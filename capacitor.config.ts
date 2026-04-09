@@ -13,12 +13,21 @@ const config: CapacitorConfig = {
     },
     FirebaseAuthentication: {
       skipNativeAuth: false,
-      providers: ['google.com'],
+      providers: ['google.com', 'phone'],
     },
     GoogleAuth: {
       scopes: ['profile', 'email'],
       serverClientId: '78991956591-f98ijc9qi1741bmlqnf7s6ti2q5p8eeb.apps.googleusercontent.com',
       forceCodeForRefreshToken: true,
+    },
+    SplashScreen: {
+      launchShowDuration: 2000,
+      launchAutoHide: true,
+      backgroundColor: "#020617",
+      androidScaleType: "CENTER_CROP",
+      showSpinner: false,
+      splashFullScreen: true,
+      splashImmersive: true,
     },
   }
 };

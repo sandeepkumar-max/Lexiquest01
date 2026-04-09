@@ -6,21 +6,24 @@ import { TextToSpeech } from '@capacitor-community/text-to-speech';
 import { AdMob } from '@capacitor-community/admob';
 import { App as CapApp } from '@capacitor/app';
 import { Dialog } from '@capacitor/dialog';
-import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target } from 'lucide-react';
+import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw } from 'lucide-react';
 import { COMMON_WORDS } from './lib/dictionary';
 import { LEARN_WORDS } from './lib/learnWords';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { FirebaseFirestore } from '@capacitor-firebase/firestore';
 import Auth from './components/Auth';
 import { motion, AnimatePresence } from 'motion/react';
+import { Purchases, LOG_LEVEL, PACKAGE_TYPE } from '@revenuecat/purchases-capacitor';
 
-type Tab = 'learn' | 'test' | 'dictionary' | 'admin' | 'profile';
+type Tab = 'learn' | 'test' | 'dictionary' | 'ai-coach' | 'admin' | 'profile';
 
 interface DictPhonetic { text?: string; audio?: string; }
 interface DictDefinition { definition: string; example?: string; synonyms: string[]; antonyms: string[]; }
 interface DictMeaning { partOfSpeech: string; definitions: DictDefinition[]; synonyms: string[]; antonyms: string[]; }
 interface DictEntry { word: string; phonetic?: string; phonetics: DictPhonetic[]; meanings: DictMeaning[]; }
 
+const ADMIN_EMAIL = 'sandeepkumarspj290@gmail.com';
+const ADMIN_PHONE = '+918406936028';
 const SUPER_ADMIN_UID = 'lhC0gmgX3rR099IiQKFwCRdrRhh2';
 
 export default function App() {
@@ -48,6 +51,12 @@ export default function App() {
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [premiumUsers, setPremiumUsers] = useState<any[]>([]);
 
+  // AI Coach State
+  const [aiChat, setAiChat] = useState<{ role: 'user' | 'model', content: string }[]>([]);
+  const [aiInput, setAiInput] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const aiChatEndRef = useRef<HTMLDivElement>(null);
+
   // AdMob State
   const [adInitialized, setAdInitialized] = useState(false);
   const [isPremium, setIsPremium] = useState(() => localStorage.getItem('isPremium') === 'true');
@@ -60,6 +69,7 @@ export default function App() {
   const [testMode, setTestMode] = useState<'listen-mcq' | 'listen-type' | 'visual-mcq' | 'meaning-mcq'>('listen-mcq');
   const [currentTestWordIndex, setCurrentTestWordIndex] = useState(0);
   const [testWords, setTestWords] = useState<string[]>([]);
+  const [testDifficulty, setTestDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
   const [mcqOptions, setMcqOptions] = useState<string[][]>([]);
   const [typedAnswer, setTypedAnswer] = useState('');
@@ -111,9 +121,9 @@ export default function App() {
   const [streakShields, setStreakShields] = useState(() => parseInt(localStorage.getItem('streakShields') || '0'));
 
   // Speech State
-  const [speechRate, setSpeechRate] = useState(1);
+  const [speechRate, setSpeechRate] = useState(0.9);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('');
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [availableVoices, setAvailableVoices] = useState<any[]>([]);
   const [speechSettingsOpen, setSpeechSettingsOpen] = useState(false);
 
   // Custom Alert/Confirm Modals
@@ -128,14 +138,26 @@ export default function App() {
   const [learnPage, setLearnPage] = useState(0);
   const wordsPerPage = 30;
   const [learnSearchQuery, setLearnSearchQuery] = useState('');
+  const [aiWords, setAiWords] = useState<{ word: string, meaning: string, example: string, category: string }[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const categories = ['All', 'Daily Use', 'Work', 'Idioms', 'Academic', 'Travel', 'Advanced'];
+
   const allLearnWords = useMemo(() => {
-    const combined = [...LEARN_WORDS, ...customWords, ...sharedWords];
-    if (!learnSearchQuery.trim()) return combined;
-    return combined.filter(w =>
-      w.word.toLowerCase().includes(learnSearchQuery.toLowerCase()) ||
-      w.meaning.toLowerCase().includes(learnSearchQuery.toLowerCase())
-    );
-  }, [customWords, sharedWords, learnSearchQuery]);
+    let combined = [...LEARN_WORDS, ...customWords, ...sharedWords, ...aiWords];
+    
+    if (learnSearchQuery.trim()) {
+      combined = combined.filter(w =>
+        w.word.toLowerCase().includes(learnSearchQuery.toLowerCase()) ||
+        (w.meaning && w.meaning.toLowerCase().includes(learnSearchQuery.toLowerCase()))
+      );
+    }
+    
+    if (selectedCategory !== 'All') {
+      combined = combined.filter(w => (w as any).category === selectedCategory);
+    }
+    
+    return combined;
+  }, [customWords, sharedWords, aiWords, learnSearchQuery, selectedCategory]);
   const totalLearnPages = Math.ceil(allLearnWords.length / wordsPerPage);
   const currentLearnWords = allLearnWords.slice(learnPage * wordsPerPage, (learnPage + 1) * wordsPerPage);
   const [expandedWord, setExpandedWord] = useState<string | null>(null);
@@ -149,6 +171,99 @@ export default function App() {
 
   // Reminder State
   const [reminderTime, setReminderTime] = useState(() => localStorage.getItem('reminderTime') || '10:00');
+
+  const fetchAiWords = async () => {
+    try {
+      const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'ai_words' });
+      if (snapshots) {
+        setAiWords(snapshots.map(s => s.data as any));
+      }
+    } catch (err) {
+      console.error('Failed to fetch AI words:', err);
+    }
+  };
+
+  const triggerAiWordGeneration = async () => {
+    if (!isAdminAuthenticated) return;
+    try {
+      const configDoc = await FirebaseFirestore.getDocument({ reference: 'config/ai_generation' });
+      const lastUpdate = (configDoc.snapshot?.data as any)?.lastUpdateTimestamp || 0;
+      const now = Date.now();
+      
+      if (now - lastUpdate < 12 * 60 * 60 * 1000) {
+        return;
+      }
+
+      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+      const prompt = `Generate exactly 50 English vocabulary words for learners. 
+      Use these categories: Daily Use, Work, Idioms, Academic, Travel, Advanced.
+      Format as a JSON array: [{"word": "string", "meaning": "Hindi string", "example": "string", "category": "category_name"}].`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.8,
+        })
+      });
+
+      const data = await response.json();
+      const content = data.choices[0].message.content.trim();
+      const cleaned = content.replace(/```json|```/g, '').trim();
+      const newWords = JSON.parse(cleaned);
+
+      for (const wordObj of newWords) {
+        await FirebaseFirestore.addDocument({
+          reference: 'ai_words',
+          data: { ...wordObj, timestamp: now }
+        });
+      }
+
+      await FirebaseFirestore.setDocument({
+        reference: 'config/ai_generation',
+        data: { lastUpdateTimestamp: now },
+        merge: true
+      });
+
+      setAlertMessage("Lexi AI has added 50 new words! ✨");
+      fetchAiWords();
+    } catch (err) {
+      console.error('AI Generation Failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchAiWords();
+      if (isAdminAuthenticated) triggerAiWordGeneration();
+      
+      // Initialize RevenueCat
+      const setupPurchases = async () => {
+        if (Capacitor.isNativePlatform()) {
+          try {
+            await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
+            // Use your RevenueCat Google API Key
+            await Purchases.configure({ apiKey: 'test_MAKtcYGZCoPthYJmASWxdELaVVo' });
+            
+            // Check status on start
+            const info = await Purchases.getCustomerInfo();
+            // Depending on version, it might be info or info.customerInfo
+            const customerInfo = (info as any).customerInfo || info;
+            
+            if (customerInfo?.entitlements?.active['premium']) {
+              setIsPremium(true);
+              localStorage.setItem('isPremium', 'true');
+            }
+          } catch (e) {
+            console.error("RevenueCat setup failed:", e);
+          }
+        }
+      };
+      setupPurchases();
+    }
+  }, [user, isAdminAuthenticated]);
   const [reminderEnabled, setReminderEnabled] = useState(() => localStorage.getItem('reminderEnabled') === 'true');
   const [reminderEverSet, setReminderEverSet] = useState(() => localStorage.getItem('reminderEverSet') === 'true');
   const [reminderPopoverOpen, setReminderPopoverOpen] = useState(false);
@@ -221,8 +336,12 @@ export default function App() {
         if (result.user) {
           setUser(result.user);
 
-          // 1. Fetch authorized admin emails
-          const adminDoc = await FirebaseFirestore.getDocument({ reference: 'config/admins' });
+          // 1. Fetch authorized admin emails and user role in parallel
+          const [adminDoc, userDoc] = await Promise.all([
+            FirebaseFirestore.getDocument({ reference: 'config/admins' }),
+            FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid })
+          ]);
+
           let authorizedEmails: string[] = [];
           if (adminDoc.snapshot && (adminDoc.snapshot.data as any)?.emails) {
             authorizedEmails = (adminDoc.snapshot.data as any).emails;
@@ -230,25 +349,55 @@ export default function App() {
           }
 
           // 2. Fetch role from Firestore
-          const doc = await FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid });
-          const role = (doc.snapshot?.data as any)?.role;
-          const isSuperAdmin = result.user.uid === SUPER_ADMIN_UID;
-          const isPremiumUser = (doc.snapshot?.data as any)?.premium === true;
+          const userData = userDoc.snapshot?.data as any;
+          const role = userData?.role;
+          const isSuperAdmin = result.user.email === ADMIN_EMAIL || result.user.phoneNumber === ADMIN_PHONE || result.user.uid === SUPER_ADMIN_UID;
+          const isEmailAdmin = authorizedEmails.includes(result.user.email?.toLowerCase() || '') || isSuperAdmin;
+          const isPremiumUser = userData?.premium === true;
+          const deletionRequestedAt = userData?.deletionRequestedAt;
 
-          if (isSuperAdmin || isPremiumUser) {
-            if (isSuperAdmin) setIsAdminAuthenticated(true);
+          // Check for pending deletion
+          if (deletionRequestedAt) {
+            const now = Date.now();
+            const hoursPassed = (now - deletionRequestedAt) / (1000 * 60 * 60);
+
+            if (hoursPassed >= 24) {
+              await FirebaseFirestore.deleteDocument({ reference: 'users/' + result.user.uid }).catch(() => { });
+              await FirebaseAuthentication.deleteUser();
+              localStorage.clear();
+              setUser(null);
+              setAlertMessage("Your account has been permanently deleted. ✨");
+              return;
+            } else {
+              await FirebaseAuthentication.signOut();
+              setUser(null);
+              setAlertMessage(`Your account deletion is in progress.`);
+              return;
+            }
+          }
+
+          // AUTHENTICATION LOGIC: If super admin, or in the authorized list, or has 'admin' role in firestore
+          if (isSuperAdmin || isEmailAdmin || role === 'admin') {
+            setIsAdminAuthenticated(true);
             setIsPremium(true);
             localStorage.setItem('isPremium', 'true');
 
-            // Sync role to Firestore if not already set but is in email list
-            const isEmailAdmin = authorizedEmails.includes(result.user.email?.toLowerCase() || '') || result.user.email === 'sandeepfalse456@gmail.com';
-            if (role !== 'admin' && isEmailAdmin) {
+            // Sync role to Firestore if actually an admin but role is not yet set
+            if (role !== 'admin' && (isSuperAdmin || isEmailAdmin)) {
               await FirebaseFirestore.setDocument({
                 reference: 'users/' + result.user.uid,
                 data: { role: 'admin' },
                 merge: true
-              });
+              }).catch(() => {});
             }
+          } else if (isPremiumUser) {
+            setIsPremium(true);
+            localStorage.setItem('isPremium', 'true');
+          }
+
+          // Enforce email verification for non-admins using email
+          if (result.user.email && !result.user.emailVerified && !isSuperAdmin && !isEmailAdmin) {
+            setUser(null);
           }
         }
       } catch (err) {
@@ -263,21 +412,42 @@ export default function App() {
     const listener = FirebaseAuthentication.addListener('authStateChange', async (result) => {
       setUser(result.user);
       if (result.user) {
-        const adminDoc = await FirebaseFirestore.getDocument({ reference: 'config/admins' });
-        const authorizedEmails = (adminDoc.snapshot?.data as any)?.emails || [];
+        setAuthLoading(true);
+        try {
+          const [adminDoc, userDoc] = await Promise.all([
+            FirebaseFirestore.getDocument({ reference: 'config/admins' }),
+            FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid })
+          ]);
 
-        const doc = await FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid });
-        const role = (doc.snapshot?.data as any)?.role;
-        const isSuperAdmin = result.user.uid === SUPER_ADMIN_UID;
-        const isPremiumUser = (doc.snapshot?.data as any)?.premium === true;
+          const userData = userDoc.snapshot?.data as any;
+          const authorizedEmails = (adminDoc.snapshot?.data as any)?.emails || [];
+          
+          const isSuperAdmin = result.user.email === ADMIN_EMAIL || result.user.phoneNumber === ADMIN_PHONE || result.user.uid === SUPER_ADMIN_UID;
+          const isEmailAdmin = authorizedEmails.includes(result.user.email?.toLowerCase() || '') || isSuperAdmin;
+          const isPremiumUser = userData?.premium === true || userData?.role === 'admin';
 
-        if (isSuperAdmin || isPremiumUser) {
-          if (isSuperAdmin) setIsAdminAuthenticated(true);
-          setIsPremium(true);
-          localStorage.setItem('isPremium', 'true');
+          if (isSuperAdmin || isEmailAdmin || userData?.role === 'admin') {
+            setIsAdminAuthenticated(true);
+            setIsPremium(true);
+            localStorage.setItem('isPremium', 'true');
+          } else if (isPremiumUser) {
+            setIsPremium(true);
+            localStorage.setItem('isPremium', 'true');
+          } else {
+            setIsAdminAuthenticated(false);
+            setIsPremium(false);
+            localStorage.setItem('isPremium', 'false');
+          }
+        } catch (err) {
+          console.error('Auth state change error:', err);
+        } finally {
+          setAuthLoading(false);
         }
       } else {
         setIsAdminAuthenticated(false);
+        setIsPremium(false);
+        localStorage.setItem('isPremium', 'false');
+        setAuthLoading(false);
       }
     });
 
@@ -351,20 +521,24 @@ export default function App() {
     }
 
     try {
-      setAuthLoading(true);
       setDeleteModalOpen(false);
-      // Delete user's document from Firestore if it exists
+      // Instead of immediate deletion, mark it as pending
       if (user?.uid) {
-        await FirebaseFirestore.deleteDocument({ reference: 'users/' + user.uid }).catch(() => { });
+        await FirebaseFirestore.setDocument({
+          reference: 'users/' + user.uid,
+          data: {
+            deletionRequestedAt: Date.now(),
+            status: 'pending_deletion'
+          },
+          merge: true
+        });
       }
 
-      // Delete the user from Firebase Auth
-      await FirebaseAuthentication.deleteUser();
-
-      // Clear local storage
+      // Sign out and clear local data
+      await FirebaseAuthentication.signOut();
       localStorage.clear();
       setUser(null);
-      setAlertMessage("Your account has been deleted. We're sorry to see you go! ✨");
+      setAlertMessage("Your account deletion request has been submitted. It will be permanently deleted after 24 hours. Sign-in is now disabled for this account. ✨");
     } catch (err: any) {
       console.error('Delete account error', err);
       if (err.message?.includes('recent-login')) {
@@ -704,29 +878,58 @@ export default function App() {
   }, [reminderPopoverOpen]);
 
   useEffect(() => {
-    // Only load web voices when NOT on a native platform
-    if (Capacitor.isNativePlatform()) return;
-    const loadVoices = () => {
-      if (!window.speechSynthesis) return;
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length === 0) return;
-      setAvailableVoices(voices);
-      setSelectedVoiceURI(prev => {
-        if (prev) return prev;
-        const defaultVoice =
-          voices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('female')) ||
-          voices.find(v => v.lang.startsWith('en-')) ||
-          voices[0];
-        return defaultVoice ? defaultVoice.voiceURI : prev;
-      });
+    const loadVoices = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const result = await TextToSpeech.getSupportedVoices();
+          // Filter for better English voices (like Google UK/US)
+          const enVoices = (result.voices || []).filter(v => v.lang.startsWith('en'));
+          setAvailableVoices(enVoices);
+          
+          setSelectedVoiceURI(prev => {
+            if (prev) return prev;
+            // Prefer Google voices as they sound more natural on Android
+            const defaultVoice = 
+              enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('en-us-x-sfg-local')) || 
+              enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('female')) ||
+              enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('enhanced')) ||
+              enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('google')) ||
+              enVoices.find(v => v.lang.startsWith('en-')) ||
+              enVoices[0];
+            return defaultVoice ? defaultVoice.voiceURI : '';
+          });
+        } catch (err) {
+          console.error('Failed to get native voices:', err);
+        }
+      } else {
+        // Web browser logic
+        if (!window.speechSynthesis) return;
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length === 0) return;
+        
+        const enVoices = voices.filter(v => v.lang.startsWith('en'));
+        setAvailableVoices(enVoices);
+        
+        setSelectedVoiceURI(prev => {
+          if (prev) return prev;
+          const defaultVoice =
+            enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('female')) ||
+            enVoices.find(v => v.lang.startsWith('en-')) ||
+            enVoices[0];
+          return defaultVoice ? defaultVoice.voiceURI : prev;
+        });
+      }
     };
+    
     loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
+    if (!Capacitor.isNativePlatform() && window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
   }, []);
 
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput === adminPin || (user?.email === 'sandeepkumarspj290@gmail.com')) {
+    if (pinInput === adminPin || (user?.email === ADMIN_EMAIL) || (user?.phoneNumber === ADMIN_PHONE)) {
       setIsAdminAuthenticated(true);
       setPinModalOpen(false);
       setPinInput('');
@@ -1003,9 +1206,21 @@ export default function App() {
     });
 
     const uniqueWordsList = Array.from(uniqueMap.values());
+    let filteredWords = uniqueWordsList;
+
+    if (testDifficulty === 'easy') {
+      filteredWords = uniqueWordsList.filter(w => w.word.length <= 4);
+      if (filteredWords.length < 10) filteredWords = uniqueWordsList.filter(w => w.word.length <= 5);
+    } else if (testDifficulty === 'medium') {
+      filteredWords = uniqueWordsList.filter(w => w.word.length === 5 || w.word.length === 6);
+    } else if (testDifficulty === 'hard') {
+      filteredWords = uniqueWordsList.filter(w => w.word.length > 6);
+    }
+
+    if (filteredWords.length < 5) filteredWords = uniqueWordsList; // Fallback if too few words
 
     // Fully randomize the entire list every time
-    const shuffled = uniqueWordsList.sort(() => 0.5 - Math.random());
+    const shuffled = filteredWords.sort(() => 0.5 - Math.random());
 
     // Select 10 words for this session
     const selected = shuffled.slice(0, 10).map(item => item.word);
@@ -1031,8 +1246,9 @@ export default function App() {
     if (!word) return;
     try {
       if (Capacitor.isNativePlatform()) {
-        // Native Android / iOS — uses device TTS engine, works for ALL words
-        await TextToSpeech.stop(); // stop any ongoing speech first
+        // Native Android / iOS — uses device TTS engine
+        const voiceIndex = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
+        await TextToSpeech.stop(); 
         await TextToSpeech.speak({
           text: word,
           lang: 'en-US',
@@ -1040,6 +1256,7 @@ export default function App() {
           pitch: 1.0,
           volume: 1.0,
           category: 'ambient',
+          voice: voiceIndex !== -1 ? voiceIndex : undefined
         });
       } else {
         // Web browser fallback
@@ -1226,20 +1443,23 @@ export default function App() {
     }
   };
 
-  const handleSubscribe = (type: 'monthly' | 'yearly') => {
-    const amount = type === 'monthly' ? 19900 : 59900;
-    const desc = type === 'monthly' ? 'Monthly Premium Subscription' : 'Yearly Premium Subscription';
+  const handleSubscribe = async (type: 'monthly' | 'yearly') => {
+    if (!Capacitor.isNativePlatform()) {
+      setAlertMessage("Payments are only available on the Android app.");
+      return;
+    }
 
-    const options = {
-      key: 'rzp_live_SZOaWBFXaSLIby',
-      amount,
-      currency: 'INR',
-      name: 'LexiQuest',
-      description: desc,
-      image: 'https://api.iconify.design/lucide:book.svg',
-      handler: async function (response: any) {
-        if (response.razorpay_payment_id) {
-          try {
+    try {
+      const offerings = await Purchases.getOfferings();
+      if (offerings.current !== null && offerings.current.availablePackages.length !== 0) {
+        // Find the package based on type
+        const pkg = offerings.current.availablePackages.find(p => 
+          type === 'monthly' ? p.packageType === PACKAGE_TYPE.MONTHLY : p.packageType === PACKAGE_TYPE.ANNUAL
+        );
+
+        if (pkg) {
+          const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg });
+          if (customerInfo.entitlements.active['premium']) {
             setIsPremium(true);
             localStorage.setItem('isPremium', 'true');
             if (user?.uid) {
@@ -1250,25 +1470,112 @@ export default function App() {
               });
             }
             setSubscriptionModalOpen(false);
-            setAlertMessage(`Welcome to Premium! Your ${type} plan is now active. ✨`);
-          } catch (err) {
-            console.error('Failed to update premium status in Firestore:', err);
-            setSubscriptionModalOpen(false);
-            setAlertMessage(`Payment successful, but we had trouble updating your profile online. Premium features are active locally!`);
+            setAlertMessage("Welcome to Premium! Your subscription is now active. ✨");
           }
+        } else {
+          setAlertMessage("Subscription plan not found. Please try again later.");
         }
-      },
-      prefill: {
-        name: displayName,
-        email: user?.email || 'user@example.com',
-        contact: '9999999999'
-      },
-      theme: {
-        color: '#4f46e5'
       }
-    };
-    const rzp = new (window as any).Razorpay(options);
-    rzp.open();
+    } catch (error: any) {
+      if (!error.userCancelled) {
+        console.error("Purchase error:", error);
+        setAlertMessage("Subscription failed. Please check your Google Play account.");
+      }
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!Capacitor.isNativePlatform()) {
+      setAlertMessage("Restore is only available on the Android app.");
+      return;
+    }
+
+    try {
+      const info = await Purchases.restorePurchases();
+      const customerInfo = (info as any).customerInfo || info;
+      
+      if (customerInfo?.entitlements?.active['premium']) {
+        setIsPremium(true);
+        localStorage.setItem('isPremium', 'true');
+        setAlertMessage("Purchases restored! You are now a Premium member. ✨");
+      } else {
+        setAlertMessage("No active premium subscription found to restore.");
+      }
+    } catch (e) {
+      console.error("Restore failed:", e);
+      setAlertMessage("Failed to restore purchases. Please try again later.");
+    }
+  };
+
+  const handleAiSendMessage = async (suggestion?: string) => {
+    const text = suggestion || aiInput;
+    if (!text.trim() || isAiLoading) return;
+
+    const newMessages = [...aiChat, { role: 'user' as const, content: text }];
+    setAiChat(newMessages);
+    setAiInput('');
+    setIsAiLoading(true);
+
+    try {
+      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+      if (!apiKey) {
+        throw new Error('AI API Key not configured. Please add VITE_GROQ_API_KEY to your .env file.');
+      }
+
+      // Format chat history for Groq/OpenAI format
+      const chatHistory = aiChat.slice(-6).map(m => ({
+        role: m.role === 'model' ? 'assistant' : 'user',
+        content: m.content
+      }));
+
+      const systemInstructionContent = `You are 'Lexi', a premium AI English Language Coach for the LexiQuest app. 
+Your goal is to help users improve their English through natural, friendly, and warm conversation.
+
+RULES:
+1. Be extremely encouraging, friendly, and supportive, like a real human mentor. 
+2. If the user makes a grammar or spelling mistake, gently point it out and provide the correct version in plain text.
+3. Suggest 1-2 advanced vocabulary words or synonyms occasionally to help them grow.
+4. Always end your response with a friendly follow-up question to keep the conversation going.
+5. Keep explanations clear, simple, and conversational.
+6. Use relevant emojis occasionally to feel more "alive" and friendly (e.g., ✨, 📚, 😊).
+7. DO NOT use markdown symbols like asterisks (**) or hashtags (#). Use plain text only for everything.
+8. Focus on helping them sound natural, like a native speaker.`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: systemInstructionContent },
+            ...chatHistory,
+            { role: 'user', content: text }
+          ],
+          max_tokens: 800,
+          temperature: 0.7,
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Groq API Error:', errorData);
+        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const botResponse = data.choices?.[0]?.message?.content || "I'm sorry, I couldn't process that. Please try again.";
+
+      setAiChat(prev => [...prev, { role: 'model', content: botResponse }]);
+    } catch (err: any) {
+      console.error('AI Coach Error:', err);
+      setAiChat(prev => [...prev, { role: 'model', content: `Error: ${err.message || 'Failed to connect to AI'}` }]);
+    } finally {
+      setIsAiLoading(false);
+      setTimeout(() => aiChatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
   };
 
   if (authLoading) {
@@ -1330,6 +1637,22 @@ export default function App() {
         >
           <CheckCircle className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Test</span>
+        </button>
+        <button
+          onClick={() => {
+            if (!isPremium && !isAdminAuthenticated) {
+              setSubscriptionModalOpen(true);
+              return;
+            }
+            setActiveTab('ai-coach');
+          }}
+          className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 relative transition-colors ${activeTab === 'ai-coach' ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}
+        >
+          <Bot className="w-6 h-6" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Coach</span>
+          {(!isPremium && !isAdminAuthenticated) && (
+            <Sparkles className="w-2.5 h-2.5 text-amber-500 absolute top-2 right-1/2 translate-x-4 fill-amber-500" />
+          )}
         </button>
         <button
           onClick={() => setActiveTab('dictionary')}
@@ -1451,12 +1774,36 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                {!isPremium && !isAdminAuthenticated && (
-                  <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
-                    ✨ Subscribe once to unlock search forever
-                  </p>
-                )}
-              </div>
+
+                {/* Category Filters */}
+                <div className="mt-4 flex flex-wrap gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                  {categoriesList.map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        if (isPremium || isAdminAuthenticated) {
+                          setSelectedCategory(cat);
+                          setLearnPage(0);
+                        } else {
+                          setSubscriptionModalOpen(true);
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCategory === cat
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
+                        : 'bg-white text-gray-500 border border-gray-100 hover:border-indigo-200'
+                        }`}
+                    >
+                      {(!isPremium && !isAdminAuthenticated && cat !== 'All') && <Lock className="w-3 h-3" />}
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              {!isPremium && !isAdminAuthenticated && (
+                <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
+                  ✨ Subscribe once to unlock search forever
+                </p>
+              )}
+            </div>
 
               {/* Daily Challenge Card */}
               {dailyWords.length > 0 && (
@@ -1663,6 +2010,24 @@ export default function App() {
                   <p className="text-gray-600 mb-8 text-lg">
                     Choose a test mode to practice your spelling skills. You will be tested on 10 random words.
                   </p>
+
+                  <div className="mb-8">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Select Difficulty</p>
+                    <div className="flex bg-gray-100 p-1 rounded-2xl max-w-xs mx-auto">
+                      {(['easy', 'medium', 'hard'] as const).map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => setTestDifficulty(d)}
+                          className={`flex-1 py-2.5 rounded-xl text-sm font-bold capitalize transition-all ${testDifficulty === d
+                              ? 'bg-white text-indigo-600 shadow-sm'
+                              : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   <div className="flex flex-col gap-4 max-w-sm mx-auto">
                     <button
@@ -1982,13 +2347,45 @@ export default function App() {
                   ) : (
                     <>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 truncate max-w-[200px] sm:max-w-none">{displayName}</h2>
-                        <button onClick={() => setIsEditingProfile(true)} className="p-1 text-slate-400 hover:text-indigo-600"><Sliders className="w-4 h-4" /></button>
+                        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 break-words line-clamp-2 leading-tight flex-1">{displayName}</h2>
+                        <button onClick={() => setIsEditingProfile(true)} className="p-1 text-slate-400 hover:text-indigo-600 flex-shrink-0"><Sliders className="w-4 h-4" /></button>
                       </div>
-                      <p className="text-slate-500 font-bold text-xs flex items-center gap-2">
-                        <Star className={`w-3.5 h-3.5 ${isPremium ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
-                        {isPremium ? 'Premium Member' : 'Free Explorer'}
-                      </p>
+                      <div className="flex items-center gap-3">
+                        <p className="text-slate-500 font-bold text-xs flex items-center gap-2">
+                          <Star className={`w-3.5 h-3.5 ${isPremium ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
+                          {isPremium ? 'Premium Member' : 'Free Explorer'}
+                        </p>
+                        <button 
+                          onClick={async () => {
+                            if (!user) return;
+                            if (Capacitor.isNativePlatform()) {
+                              handleRestore();
+                            } else {
+                              setAuthLoading(true);
+                              try {
+                                const userDoc = await FirebaseFirestore.getDocument({ reference: 'users/' + user.uid });
+                                const userData = userDoc.snapshot?.data as any;
+                                if (userData?.premium) {
+                                  setIsPremium(true);
+                                  localStorage.setItem('isPremium', 'true');
+                                  setAlertMessage("Subscription verified! You are a Premium member. ✨");
+                                } else {
+                                  setIsPremium(false);
+                                  localStorage.setItem('isPremium', 'false');
+                                  setAlertMessage("No active subscription found. Please check your account.");
+                                }
+                              } catch (err) {
+                                setAlertMessage("Failed to verify subscription. Please try again later.");
+                              } finally {
+                                setAuthLoading(false);
+                              }
+                            }
+                          }}
+                          className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline"
+                        >
+                          Restore Purchases
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -2152,6 +2549,10 @@ export default function App() {
                     <span className="font-bold text-rose-600">Delete Account</span>
                   </div>
                 </button>
+              </div>
+              
+              <div className="text-center mb-10">
+                <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">LexiQuest v1.1</p>
               </div>
 
               {user?.uid === SUPER_ADMIN_UID && !isAdminAuthenticated && (
@@ -2391,6 +2792,115 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'ai-coach' && (isPremium || isAdminAuthenticated) && (
+          <div className="flex-1 max-w-2xl mx-auto w-full flex flex-col h-[calc(100vh-120px)] bg-slate-50">
+            {/* AI Header */}
+            <div className="p-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
+                  <Bot className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 leading-tight">AI English Coach</h3>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Active Now</span>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setAiChat([])}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                title="Clear Chat"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Chat Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth pb-20">
+              {aiChat.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                  <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4 text-indigo-600">
+                    <Sparkles className="w-8 h-8" />
+                  </div>
+                  <h4 className="text-lg font-black text-slate-900 mb-1">Interactive Learning</h4>
+                  <p className="text-slate-500 text-xs max-w-[200px] font-medium leading-relaxed">
+                    Chat with me to improve your English. Try these suggestions:
+                  </p>
+                  <div className="mt-6 grid grid-cols-1 gap-2 w-full max-w-[240px]">
+                    {["How to improve vocabulary?", "Explain 'perseverance'", "Check my grammar: I goes home"].map((suggestion, i) => (
+                      <button 
+                        key={i}
+                        onClick={() => handleAiSendMessage(suggestion)}
+                        className="p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 hover:border-indigo-600 hover:text-indigo-600 transition-all text-left shadow-sm"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                aiChat.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`relative max-w-[85%] p-3.5 rounded-2xl text-xs leading-relaxed group ${
+                      msg.role === 'user' 
+                        ? 'bg-indigo-600 text-white font-medium rounded-tr-none shadow-md' 
+                        : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none font-medium shadow-sm'
+                    }`}>
+                      {msg.content}
+                      {msg.role === 'model' && (
+                        <button 
+                          onClick={() => playWord(msg.content)}
+                          className="absolute -right-8 bottom-0 p-1.5 text-slate-400 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Speak response"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+              {isAiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none flex gap-1 shadow-sm">
+                    <span className="w-1 h-1 bg-slate-300 rounded-full animate-bounce"></span>
+                    <span className="w-1 h-1 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                    <span className="w-1 h-1 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                  </div>
+                </div>
+              )}
+              <div ref={aiChatEndRef} />
+            </div>
+
+            {/* AI Input */}
+            <div className="fixed bottom-16 left-0 right-0 p-4 bg-white border-t border-slate-200 z-10">
+              <div className="max-w-2xl mx-auto">
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); handleAiSendMessage(); }}
+                  className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-1 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all"
+                >
+                  <input 
+                    type="text"
+                    value={aiInput}
+                    onChange={(e) => setAiInput(e.target.value)}
+                    placeholder="Message your coach..."
+                    className="flex-1 bg-transparent border-none outline-none px-3 py-2 text-xs font-bold text-slate-900 placeholder-slate-400"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={!aiInput.trim() || isAiLoading}
+                    className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md active:scale-90 shrink-0"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'admin' && isAdminAuthenticated && (
           <div className="flex-1 p-6 lg:p-10 overflow-y-auto">
             <div className="max-w-3xl mx-auto">
@@ -2447,7 +2957,7 @@ export default function App() {
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Current Admins</p>
                   <div className="flex flex-wrap gap-2">
-                    <span className="px-3 py-1 bg-purple-50 text-purple-700 text-xs font-bold rounded-full border border-purple-200">sandeepfalse456@gmail.com (Super)</span>
+                    <span className="px-3 py-1 bg-purple-50 text-purple-700 text-xs font-bold rounded-full border border-purple-200">sandeepkumarspj290@gmail.com (Super)</span>
                     {adminEmails.map(email => (
                       <div key={email} className="flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-200">
                         <span>{email}</span>
@@ -2976,10 +3486,10 @@ export default function App() {
                     onClick={() => handleSubscribe('yearly')}
                     className="p-5 rounded-3xl border-2 border-indigo-600 bg-indigo-50/50 text-left relative overflow-hidden"
                   >
-                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">Best Value</div>
-                    <p className="text-[10px] font-black text-indigo-600 uppercase mb-1">Yearly</p>
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">6 Months Offer</div>
+                    <p className="text-[10px] font-black text-indigo-600 uppercase mb-1">Premium Plan</p>
                     <p className="text-2xl font-black text-slate-900">₹599</p>
-                    <p className="text-[10px] font-bold text-indigo-600 mt-2">Save 75% →</p>
+                    <p className="text-[10px] font-bold text-indigo-600 mt-2">6 Months Access →</p>
                   </button>
                 </div>
 
@@ -2996,7 +3506,7 @@ export default function App() {
                   ))}
                 </div>
 
-                <p className="text-center text-[10px] text-gray-400 mt-4 px-4 uppercase tracking-widest font-bold">Secure Payment powered by Razorpay</p>
+                <p className="text-center text-[10px] text-gray-400 mt-4 px-4 uppercase tracking-widest font-bold">Secure Payment powered by Google Play</p>
               </div>
             </div>
           </div>
