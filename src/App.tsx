@@ -6,7 +6,7 @@ import { TextToSpeech } from '@capacitor-community/text-to-speech';
 import { AdMob } from '@capacitor-community/admob';
 import { App as CapApp } from '@capacitor/app';
 import { Dialog } from '@capacitor/dialog';
-import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw } from 'lucide-react';
+import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info } from 'lucide-react';
 import { COMMON_WORDS } from './lib/dictionary';
 import { LEARN_WORDS } from './lib/learnWords';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
@@ -1776,8 +1776,8 @@ RULES:
                 </div>
 
                 {/* Category Filters */}
-                <div className="mt-4 flex flex-wrap gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                  {categoriesList.map(cat => (
+                <div className="mt-4 flex flex-nowrap gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                  {categories.map(cat => (
                     <button
                       key={cat}
                       onClick={() => {
@@ -3476,21 +3476,31 @@ RULES:
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <button
                     onClick={() => handleSubscribe('monthly')}
-                    className="p-5 rounded-3xl border-2 border-slate-100 hover:border-indigo-600 transition-all text-left group bg-slate-50 hover:bg-white"
+                    className="p-5 rounded-3xl border-2 border-amber-400 bg-amber-50 hover:border-indigo-600 transition-all text-left group relative overflow-hidden"
                   >
-                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Monthly</p>
-                    <p className="text-2xl font-black text-slate-900">₹199</p>
-                    <p className="text-[10px] font-bold text-indigo-600 mt-2 group-hover:scale-105 transition-transform">Get Started →</p>
+                    <div className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">Exclusive Offer</div>
+                    <p className="text-[10px] font-black text-amber-600 uppercase mb-1">Trial Plan</p>
+                    <p className="text-2xl font-black text-slate-900">₹2 <span className="text-xs font-bold text-slate-400">/ 1 Day</span></p>
+                    <p className="text-[10px] font-bold text-indigo-600 mt-2">Then ₹199/month (Auto-pay) →</p>
                   </button>
                   <button
                     onClick={() => handleSubscribe('yearly')}
                     className="p-5 rounded-3xl border-2 border-indigo-600 bg-indigo-50/50 text-left relative overflow-hidden"
                   >
-                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">6 Months Offer</div>
-                    <p className="text-[10px] font-black text-indigo-600 uppercase mb-1">Premium Plan</p>
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">Limited Deal</div>
+                    <p className="text-[10px] font-black text-indigo-600 uppercase mb-1">Global Access</p>
                     <p className="text-2xl font-black text-slate-900">₹599</p>
-                    <p className="text-[10px] font-bold text-indigo-600 mt-2">6 Months Access →</p>
+                    <p className="text-[10px] font-bold text-indigo-600 mt-2">Full 6 Months Access →</p>
                   </button>
+                </div>
+
+                <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight mb-2 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5 text-indigo-500" /> Subscription Details
+                  </p>
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                    Start your 1-day trial for just <span className="font-bold text-indigo-600">₹2</span>. After 24 hours, you will be automatically charged <span className="font-bold text-indigo-600">₹199/month</span> unless cancelled in Google Play. Manage or cancel anytime.
+                  </p>
                 </div>
 
                 <div className="space-y-3 mb-6">
