@@ -8,8 +8,8 @@ LexiQuest ("we," "our," or "us") is committed to protecting your privacy. This P
 
 ### 1.1 Personal Information
 
-- **Account Information**: When you sign up or log in using Firebase Authentication (Google, Email, etc.), we collect your name, email address, and profile picture.
-- **Payment Information**: We use **Razorpay** to process payments for premium subscriptions. We do not store your credit card or bank details on our servers; they are handled securely by Razorpay.
+- **Account Information**: When you sign up or log in using Firebase Authentication (Google, Email, Phone, etc.), we collect your name, email address, phone number, and profile picture.
+- **Payment Information**: We use **RevenueCat** and **Google Play Billing** to process payments for premium subscriptions. We do not store your credit card or bank details on our servers; they are handled securely by Google Play.
 
 ### 1.2 Usage and Technical Data
 
@@ -38,7 +38,8 @@ We use the following third-party services which may collect data according to th
 
 - **Google Firebase**: For authentication and cloud storage (Firestore). [<https://firebase.google.com/support/privacy>]
 - **Google AdMob**: For displaying advertisements. [<https://policies.google.com/privacy>]
-- **Razorpay**: For secure payment processing. [<https://razorpay.com/privacy/>]
+- **RevenueCat**: For subscription management and data analytics. [<https://www.revenuecat.com/privacy>]
+- **Google Play Billing**: For secure payment processing. [<https://payments.google.com/payments/apis-privacy>]
 
 ## 5. Account Deletion and Data Retention
 
@@ -78,7 +79,7 @@ LexiQuest provides digital content and subscriptions. Please read our refund pol
 - **Refund Eligibility**:
   - Refunds are generally not provided for partially used subscription periods.
   - If you believe you have been charged in error, please contact us at <sandeepkumarspj290@gmail.com> within 7 days of the transaction.
-  - Refund requests will be evaluated on a case-by-case basis in accordance with Google Play Store and Razorpay policies.
+  - Refund requests will be evaluated on a case-by-case basis in accordance with Google Play Store and RevenueCat policies.
 - **Processing**: Once a refund is approved, it may take 5-7 business days to reflect in your original payment method.
 
 ## 11. Contact Information (Merchant Details)

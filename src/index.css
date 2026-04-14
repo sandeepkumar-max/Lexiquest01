@@ -1,1 +1,63 @@
 @import "tailwindcss";
+
+:root {
+  --bg-color: #f8fafc;
+  --panel-color: #ffffff;
+  --text-main: #0f172a;
+  --text-sub: #475569;
+  --border-color: #e2e8f0;
+}
+
+body.dark-mode {
+  --bg-color: #010409;
+  --panel-color: #0d1117;
+  --text-main: #f0f6fc;
+  --text-sub: #8b949e;
+  --border-color: #30363d;
+}
+
+body.dark-mode {
+  background-color: var(--bg-color) !important;
+  color: var(--text-main) !important;
+}
+
+body.dark-mode .bg-white {
+  background-color: var(--panel-color) !important;
+}
+
+body.dark-mode .bg-gray-50, 
+body.dark-mode .bg-slate-50 {
+  background-color: var(--bg-color) !important;
+}
+
+body.dark-mode .text-slate-900,
+body.dark-mode .text-gray-900,
+body.dark-mode .text-slate-800 {
+  color: var(--text-main) !important;
+}
+
+body.dark-mode .text-slate-500,
+body.dark-mode .text-gray-600,
+body.dark-mode .text-slate-600 {
+  color: var(--text-sub) !important;
+}
+
+body.dark-mode .border-gray-200,
+body.dark-mode .border-slate-200,
+body.dark-mode .border-slate-100 {
+  border-color: var(--border-color) !important;
+}
+
+body.dark-mode header,
+body.dark-mode nav {
+  background-color: var(--panel-color) !important;
+  border-color: var(--border-color) !important;
+}
+
+body.dark-mode input,
+body.dark-mode textarea,
+body.dark-mode select {
+  background-color: #161b22 !important;
+  border-color: var(--border-color) !important;
+  color: white !important;
+}

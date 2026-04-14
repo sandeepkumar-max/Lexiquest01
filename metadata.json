@@ -1,5 +1,5 @@
 {
-  "name": "Offline Spell Checker",
-  "description": "An offline spelling check application with a custom dictionary admin panel.",
+  "name": "LexiQuest",
+  "description": "Premium English vocabulary builder and spelling practice app with AI coach support.",
   "requestFramePermissions": []
 }

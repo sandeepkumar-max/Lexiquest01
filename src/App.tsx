@@ -15,41 +15,33 @@ import Auth from './components/Auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { Purchases, LOG_LEVEL, PACKAGE_TYPE } from '@revenuecat/purchases-capacitor';
 
-type Tab = 'learn' | 'test' | 'dictionary' | 'ai-coach' | 'admin' | 'profile';
+type Tab = 'learn' | 'test' | 'dictionary' | 'ai-coach' | 'profile';
 
 interface DictPhonetic { text?: string; audio?: string; }
 interface DictDefinition { definition: string; example?: string; synonyms: string[]; antonyms: string[]; }
 interface DictMeaning { partOfSpeech: string; definitions: DictDefinition[]; synonyms: string[]; antonyms: string[]; }
 interface DictEntry { word: string; phonetic?: string; phonetics: DictPhonetic[]; meanings: DictMeaning[]; }
 
-const ADMIN_EMAIL = 'sandeepkumarspj290@gmail.com';
-const ADMIN_PHONE = '+918406936028';
-const SUPER_ADMIN_UID = 'lhC0gmgX3rR099IiQKFwCRdrRhh2';
+
+
+const MASTER_ADMIN_EMAIL = 'sandeepkumarspj290@gmail.com';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('learn');
   const [customWords, setCustomWords] = useState<{ word: string, meaning: string, example: string }[]>([]);
   const [sharedWords, setSharedWords] = useState<{ word: string, meaning: string, example: string }[]>([]);
-  const [bulkWords, setBulkWords] = useState(Array.from({ length: 2 }, () => ({ word: '', meaning: '', example: '' })));
+
 
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [pinModalOpen, setPinModalOpen] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [adminPin, setAdminPin] = useState(() => localStorage.getItem('adminPin') || '1234');
-  const [newAdminPin, setNewAdminPin] = useState('');
-  const [pinChangeMessage, setPinChangeMessage] = useState('');
+
 
   // Profile Edit State
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [displayName, setDisplayName] = useState(() => user?.displayName || localStorage.getItem('userName') || 'Adventurer');
   const [profileImage, setProfileImage] = useState(() => localStorage.getItem('profileImage') || '');
-  const [adminEmails, setAdminEmails] = useState<string[]>([]);
-  const [newAdminEmail, setNewAdminEmail] = useState('');
-  const [premiumUsers, setPremiumUsers] = useState<any[]>([]);
+
 
   // AI Coach State
   const [aiChat, setAiChat] = useState<{ role: 'user' | 'model', content: string }[]>([]);
@@ -133,6 +125,9 @@ export default function App() {
   const [clearConfirmModalOpen, setClearConfirmModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
+  const [dailyWordsModalOpen, setDailyWordsModalOpen] = useState(false);
+  const [adminAddModalOpen, setAdminAddModalOpen] = useState(false);
+  const [newWordData, setNewWordData] = useState({ word: '', meaning: '', example: '', category: 'All' });
 
   // Learn State
   const [learnPage, setLearnPage] = useState(0);
@@ -144,18 +139,18 @@ export default function App() {
 
   const allLearnWords = useMemo(() => {
     let combined = [...LEARN_WORDS, ...customWords, ...sharedWords, ...aiWords];
-    
+
     if (learnSearchQuery.trim()) {
       combined = combined.filter(w =>
         w.word.toLowerCase().includes(learnSearchQuery.toLowerCase()) ||
         (w.meaning && w.meaning.toLowerCase().includes(learnSearchQuery.toLowerCase()))
       );
     }
-    
+
     if (selectedCategory !== 'All') {
       combined = combined.filter(w => (w as any).category === selectedCategory);
     }
-    
+
     return combined;
   }, [customWords, sharedWords, aiWords, learnSearchQuery, selectedCategory]);
   const totalLearnPages = Math.ceil(allLearnWords.length / wordsPerPage);
@@ -168,102 +163,77 @@ export default function App() {
   const [dictLoading, setDictLoading] = useState(false);
   const [dictError, setDictError] = useState('');
   const [dictAudio, setDictAudio] = useState<HTMLAudioElement | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [hindiTranslation, setHindiTranslation] = useState<any>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
+  const [leaderboard, setLeaderboard] = useState<{ name: string, xp: number, level: number }[]>([]);
+  const [xpHistory, setXpHistory] = useState<number[]>(() => {
+    const saved = localStorage.getItem('xpHistory');
+    return saved ? JSON.parse(saved) : [0, 0, 0, 0, 0, 0, 0];
+  });
+  const [isListening, setIsListening] = useState(false);
 
   // Reminder State
   const [reminderTime, setReminderTime] = useState(() => localStorage.getItem('reminderTime') || '10:00');
 
-  const fetchAiWords = async () => {
+  const fetchAiWords = async (force = false) => {
     try {
+      // Caching logic: Only fetch if forced or if cache is older than 12 hours
+      const cachedData = localStorage.getItem('cached_ai_words');
+      const cacheTimestamp = localStorage.getItem('cached_ai_words_ts');
+      const now = Date.now();
+      const twelveHours = 12 * 60 * 60 * 1000;
+
+      if (!force && cachedData && cacheTimestamp && (now - parseInt(cacheTimestamp)) < twelveHours) {
+        setAiWords(JSON.parse(cachedData));
+        return;
+      }
+
       const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'ai_words' });
       if (snapshots) {
-        setAiWords(snapshots.map(s => s.data as any));
+        const words = snapshots.map(s => s.data as any);
+        setAiWords(words);
+        localStorage.setItem('cached_ai_words', JSON.stringify(words));
+        localStorage.setItem('cached_ai_words_ts', now.toString());
       }
     } catch (err) {
       console.error('Failed to fetch AI words:', err);
     }
   };
 
-  const triggerAiWordGeneration = async () => {
-    if (!isAdminAuthenticated) return;
-    try {
-      const configDoc = await FirebaseFirestore.getDocument({ reference: 'config/ai_generation' });
-      const lastUpdate = (configDoc.snapshot?.data as any)?.lastUpdateTimestamp || 0;
-      const now = Date.now();
-      
-      if (now - lastUpdate < 12 * 60 * 60 * 1000) {
-        return;
-      }
-
-      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
-      const prompt = `Generate exactly 50 English vocabulary words for learners. 
-      Use these categories: Daily Use, Work, Idioms, Academic, Travel, Advanced.
-      Format as a JSON array: [{"word": "string", "meaning": "Hindi string", "example": "string", "category": "category_name"}].`;
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.8,
-        })
-      });
-
-      const data = await response.json();
-      const content = data.choices[0].message.content.trim();
-      const cleaned = content.replace(/```json|```/g, '').trim();
-      const newWords = JSON.parse(cleaned);
-
-      for (const wordObj of newWords) {
-        await FirebaseFirestore.addDocument({
-          reference: 'ai_words',
-          data: { ...wordObj, timestamp: now }
-        });
-      }
-
-      await FirebaseFirestore.setDocument({
-        reference: 'config/ai_generation',
-        data: { lastUpdateTimestamp: now },
-        merge: true
-      });
-
-      setAlertMessage("Lexi AI has added 50 new words! ✨");
-      fetchAiWords();
-    } catch (err) {
-      console.error('AI Generation Failed:', err);
-    }
-  };
-
   useEffect(() => {
     if (user) {
       fetchAiWords();
-      if (isAdminAuthenticated) triggerAiWordGeneration();
-      
+
       // Initialize RevenueCat
       const setupPurchases = async () => {
         if (Capacitor.isNativePlatform()) {
           try {
             await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
-            // Use your RevenueCat Google API Key
-            await Purchases.configure({ apiKey: 'test_MAKtcYGZCoPthYJmASWxdELaVVo' });
-            
+            await Purchases.configure({ apiKey: 'goog_LysRWtNTBrBgDYdwvHhTHOjGEdq' });
+
             // Check status on start
             const info = await Purchases.getCustomerInfo();
-            // Depending on version, it might be info or info.customerInfo
             const customerInfo = (info as any).customerInfo || info;
-            
+            console.log("RevenueCat Customer Info:", customerInfo);
+
             if (customerInfo?.entitlements?.active['premium']) {
               setIsPremium(true);
               localStorage.setItem('isPremium', 'true');
             }
-          } catch (e) {
-            console.error("RevenueCat setup failed:", e);
+          } catch (e: any) {
+            console.error("RevenueCat setup/info error:", e);
           }
         }
       };
       setupPurchases();
+      // Internal Admin Check (Stealth)
+      if (user.email === MASTER_ADMIN_EMAIL) {
+        setIsPremium(true);
+        localStorage.setItem('isPremium', 'true');
+      }
     }
-  }, [user, isAdminAuthenticated]);
+  }, [user]);
   const [reminderEnabled, setReminderEnabled] = useState(() => localStorage.getItem('reminderEnabled') === 'true');
   const [reminderEverSet, setReminderEverSet] = useState(() => localStorage.getItem('reminderEverSet') === 'true');
   const [reminderPopoverOpen, setReminderPopoverOpen] = useState(false);
@@ -271,9 +241,7 @@ export default function App() {
   const reminderPopoverRef = useRef<HTMLDivElement>(null);
   const reminderBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Bulk Import State
-  const [bulkImportText, setBulkImportText] = useState('');
-  const [isImporting, setIsImporting] = useState(false);
+
 
   // Scroll to top when test results are shown
   useEffect(() => {
@@ -287,7 +255,7 @@ export default function App() {
 
   // Initialize AdMob and setup periodic interstitial
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || isPremium || isAdminAuthenticated) {
+    if (!Capacitor.isNativePlatform() || !user || isPremium) {
       return;
     }
 
@@ -323,7 +291,7 @@ export default function App() {
     return () => {
       if (adInterval) clearInterval(adInterval);
     };
-  }, [isPremium, isAdminAuthenticated]);
+  }, [isPremium]);
 
   // AdMob and setup periodic interstitial
 
@@ -336,23 +304,11 @@ export default function App() {
         if (result.user) {
           setUser(result.user);
 
-          // 1. Fetch authorized admin emails and user role in parallel
-          const [adminDoc, userDoc] = await Promise.all([
-            FirebaseFirestore.getDocument({ reference: 'config/admins' }),
-            FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid })
-          ]);
+          // 1. Fetch user role from Firestore
+          const userDoc = await FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid });
 
-          let authorizedEmails: string[] = [];
-          if (adminDoc.snapshot && (adminDoc.snapshot.data as any)?.emails) {
-            authorizedEmails = (adminDoc.snapshot.data as any).emails;
-            setAdminEmails(authorizedEmails);
-          }
-
-          // 2. Fetch role from Firestore
+          // 2. Extract premium status
           const userData = userDoc.snapshot?.data as any;
-          const role = userData?.role;
-          const isSuperAdmin = result.user.email === ADMIN_EMAIL || result.user.phoneNumber === ADMIN_PHONE || result.user.uid === SUPER_ADMIN_UID;
-          const isEmailAdmin = authorizedEmails.includes(result.user.email?.toLowerCase() || '') || isSuperAdmin;
           const isPremiumUser = userData?.premium === true;
           const deletionRequestedAt = userData?.deletionRequestedAt;
 
@@ -376,27 +332,17 @@ export default function App() {
             }
           }
 
-          // AUTHENTICATION LOGIC: If super admin, or in the authorized list, or has 'admin' role in firestore
-          if (isSuperAdmin || isEmailAdmin || role === 'admin') {
-            setIsAdminAuthenticated(true);
+          // AUTHENTICATION LOGIC: Purely based on Firestore premium field
+          if (isPremiumUser) {
             setIsPremium(true);
             localStorage.setItem('isPremium', 'true');
-
-            // Sync role to Firestore if actually an admin but role is not yet set
-            if (role !== 'admin' && (isSuperAdmin || isEmailAdmin)) {
-              await FirebaseFirestore.setDocument({
-                reference: 'users/' + result.user.uid,
-                data: { role: 'admin' },
-                merge: true
-              }).catch(() => {});
-            }
-          } else if (isPremiumUser) {
-            setIsPremium(true);
-            localStorage.setItem('isPremium', 'true');
+          } else {
+            setIsPremium(false);
+            localStorage.setItem('isPremium', 'false');
           }
 
           // Enforce email verification for non-admins using email
-          if (result.user.email && !result.user.emailVerified && !isSuperAdmin && !isEmailAdmin) {
+          if (result.user.email && !result.user.emailVerified) {
             setUser(null);
           }
         }
@@ -414,27 +360,14 @@ export default function App() {
       if (result.user) {
         setAuthLoading(true);
         try {
-          const [adminDoc, userDoc] = await Promise.all([
-            FirebaseFirestore.getDocument({ reference: 'config/admins' }),
-            FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid })
-          ]);
-
+          const userDoc = await FirebaseFirestore.getDocument({ reference: 'users/' + result.user.uid });
           const userData = userDoc.snapshot?.data as any;
-          const authorizedEmails = (adminDoc.snapshot?.data as any)?.emails || [];
-          
-          const isSuperAdmin = result.user.email === ADMIN_EMAIL || result.user.phoneNumber === ADMIN_PHONE || result.user.uid === SUPER_ADMIN_UID;
-          const isEmailAdmin = authorizedEmails.includes(result.user.email?.toLowerCase() || '') || isSuperAdmin;
-          const isPremiumUser = userData?.premium === true || userData?.role === 'admin';
+          const isPremiumUser = userData?.premium === true;
 
-          if (isSuperAdmin || isEmailAdmin || userData?.role === 'admin') {
-            setIsAdminAuthenticated(true);
-            setIsPremium(true);
-            localStorage.setItem('isPremium', 'true');
-          } else if (isPremiumUser) {
+          if (isPremiumUser) {
             setIsPremium(true);
             localStorage.setItem('isPremium', 'true');
           } else {
-            setIsAdminAuthenticated(false);
             setIsPremium(false);
             localStorage.setItem('isPremium', 'false');
           }
@@ -444,7 +377,6 @@ export default function App() {
           setAuthLoading(false);
         }
       } else {
-        setIsAdminAuthenticated(false);
         setIsPremium(false);
         localStorage.setItem('isPremium', 'false');
         setAuthLoading(false);
@@ -456,41 +388,95 @@ export default function App() {
     };
   }, []);
 
+  const handleAdminAddWord = async () => {
+    if (!newWordData.word || !newWordData.meaning) return;
+    setIsAiLoading(true);
+    try {
+      await FirebaseFirestore.setDocument({
+        reference: 'shared_words/' + newWordData.word.toLowerCase(),
+        data: {
+          word: newWordData.word.toLowerCase(),
+          meaning: newWordData.meaning,
+          example: newWordData.example || 'Example context not provided.',
+          category: newWordData.category
+        }
+      });
+      setAlertMessage("Word added to Global Dictionary! ✨");
+      setAdminAddModalOpen(false);
+      setNewWordData({ word: '', meaning: '', example: '', category: 'All' });
+      // Clear cache to force re-fetch
+      localStorage.removeItem('cached_shared_words_ts');
+      localStorage.removeItem('cached_ai_words_ts');
+      fetchAiWords(true); 
+    } catch (err) {
+      setAlertMessage("Failed to add word.");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const fetchLeaderboard = async () => {
+    try {
+      const { snapshots } = await FirebaseFirestore.getCollection({ 
+        reference: 'users',
+        // In a real app we would use compound queries, but for now we'll fetch and sort top users
+      });
+      if (snapshots) {
+        const board = snapshots
+          .map(s => s.data as any)
+          .sort((a, b) => (b.xp || 0) - (a.xp || 0))
+          .slice(0, 10);
+        setLeaderboard(board);
+      }
+    } catch (err) {
+      console.error('Leaderboard error:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'profile') {
+      fetchLeaderboard();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.body.classList.add('dark-mode');
+    } else {
+      document.body.classList.remove('dark-mode');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
   // Fetch Shared Words from Firestore
   useEffect(() => {
     const fetchSharedWords = async () => {
       try {
+        const cachedData = localStorage.getItem('cached_shared_words');
+        const cacheTimestamp = localStorage.getItem('cached_shared_words_ts');
+        const now = Date.now();
+        const twelveHours = 12 * 60 * 60 * 1000;
+
+        if (cachedData && cacheTimestamp && (now - parseInt(cacheTimestamp)) < twelveHours) {
+          setSharedWords(JSON.parse(cachedData));
+          return;
+        }
+
         const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'shared_words' });
         if (snapshots) {
           const words = snapshots.map(s => s.data as { word: string, meaning: string, example: string });
           setSharedWords(words);
+          localStorage.setItem('cached_shared_words', JSON.stringify(words));
+          localStorage.setItem('cached_shared_words_ts', now.toString());
         }
       } catch (err) {
         console.error('Failed to fetch shared words:', err);
       }
     };
     fetchSharedWords();
-  }, [user]); // Re-fetch on login
+  }, [user]); // Re-fetch only on user login/change
 
-  // Fetch Premium Users for Admin
-  useEffect(() => {
-    if (!isAdminAuthenticated || activeTab !== 'admin') return;
 
-    const fetchPremiumUsers = async () => {
-      try {
-        const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'users' });
-        if (snapshots) {
-          const premiums = snapshots
-            .map(s => s.data as any)
-            .filter(u => u.premium === true);
-          setPremiumUsers(premiums);
-        }
-      } catch (err) {
-        console.error('Failed to fetch premium users:', err);
-      }
-    };
-    fetchPremiumUsers();
-  }, [isAdminAuthenticated, activeTab]);
 
   const handleSignOut = async () => {
     const { value } = await Dialog.confirm({
@@ -557,8 +543,8 @@ export default function App() {
       const listener = await CapApp.addListener('backButton', async () => {
         if (subscriptionModalOpen) {
           setSubscriptionModalOpen(false);
-        } else if (pinModalOpen) {
-          setPinModalOpen(false);
+        } else if (dailyWordsModalOpen) {
+          setDailyWordsModalOpen(false);
         } else if (testState === 'testing') {
           const { value } = await Dialog.confirm({
             title: 'Exit Test',
@@ -589,7 +575,7 @@ export default function App() {
     return () => {
       listenerPromise.then(l => l.remove());
     };
-  }, [subscriptionModalOpen, pinModalOpen, testState, activeTab]);
+  }, [subscriptionModalOpen, dailyWordsModalOpen, testState, activeTab]);
 
 
   useEffect(() => {
@@ -615,6 +601,12 @@ export default function App() {
       const newXp = prev + amount;
       localStorage.setItem('xp', newXp.toString());
 
+      // Track daily progress
+      const currentHistory = [...xpHistory];
+      currentHistory[6] += amount; 
+      setXpHistory(currentHistory);
+      localStorage.setItem('xpHistory', JSON.stringify(currentHistory));
+
       // Level logic: level 1 is 0-100, level 2 is 100-300, level 3 is 300-600 (quadratic)
       const nextLevelThreshold = level * 100 * level;
       if (newXp >= nextLevelThreshold) {
@@ -622,11 +614,24 @@ export default function App() {
           const newLevel = l + 1;
           localStorage.setItem('level', newLevel.toString());
           setShowLevelUp(true);
+          // Refill streak shields on level up (Premium Perk)
+          if (isPremium) {
+            setStreakShields(prev => Math.min(prev + 1, 3));
+          }
           return newLevel;
         });
       }
       return newXp;
     });
+
+    // Sync XP to Firestore for Leaderboard
+    if (user?.uid) {
+      FirebaseFirestore.setDocument({
+        reference: 'users/' + user.uid,
+        data: { xp: xp + amount, level: level, name: displayName || user.displayName || 'Explorer' },
+        merge: true
+      });
+    }
   };
 
   const updateMission = (id: string, amount: number = 1) => {
@@ -885,12 +890,12 @@ export default function App() {
           // Filter for better English voices (like Google UK/US)
           const enVoices = (result.voices || []).filter(v => v.lang.startsWith('en'));
           setAvailableVoices(enVoices);
-          
+
           setSelectedVoiceURI(prev => {
             if (prev) return prev;
             // Prefer Google voices as they sound more natural on Android
-            const defaultVoice = 
-              enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('en-us-x-sfg-local')) || 
+            const defaultVoice =
+              enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('en-us-x-sfg-local')) ||
               enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('female')) ||
               enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('enhanced')) ||
               enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('google')) ||
@@ -906,10 +911,10 @@ export default function App() {
         if (!window.speechSynthesis) return;
         const voices = window.speechSynthesis.getVoices();
         if (voices.length === 0) return;
-        
+
         const enVoices = voices.filter(v => v.lang.startsWith('en'));
         setAvailableVoices(enVoices);
-        
+
         setSelectedVoiceURI(prev => {
           if (prev) return prev;
           const defaultVoice =
@@ -920,115 +925,18 @@ export default function App() {
         });
       }
     };
-    
+
     loadVoices();
     if (!Capacitor.isNativePlatform() && window.speechSynthesis) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
   }, []);
 
-  const handlePinSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pinInput === adminPin || (user?.email === ADMIN_EMAIL) || (user?.phoneNumber === ADMIN_PHONE)) {
-      setIsAdminAuthenticated(true);
-      setPinModalOpen(false);
-      setPinInput('');
-      setPinError('');
-      setIsPremium(true);
-    } else {
-      setPinError('Incorrect PIN');
-    }
-  };
 
-  const handleAddToGlobal = async (entry: DictEntry) => {
-    if (!isAdminAuthenticated) return;
-    setIsImporting(true);
-    try {
-      const word = entry.word.toLowerCase();
-      // Check for duplicate
-      if (sharedWords.some(w => w.word.toLowerCase() === word)) {
-        setAlertMessage(`"${word}" is already in the Global Dictionary.`);
-        return;
-      }
 
-      const meaning = entry.meanings[0].definitions[0].definition;
-      const example = entry.meanings[0].definitions[0].example || 'No example provided.';
 
-      await FirebaseFirestore.setDocument({
-        reference: 'shared_words/' + word,
-        data: { word, meaning, example }
-      });
 
-      setAlertMessage(`"${word}" added to Global Dictionary! ✨`);
-      // Update local sharedWords state
-      const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'shared_words' });
-      if (snapshots) setSharedWords(snapshots.map(s => s.data as any));
-    } catch (err) {
-      console.error('Add to global error:', err);
-      setAlertMessage('Failed to add word to Global Dictionary.');
-    } finally {
-      setIsImporting(false);
-    }
-  };
 
-  const handleAddCustomWordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const validWords = bulkWords.filter(w => w.word.trim() && w.meaning.trim() && w.example.trim());
-
-    if (validWords.length === 0) {
-      setAlertMessage("Please fill in all fields (Word, Meaning, Example) for at least one word.");
-      return;
-    }
-
-    const newCustomWords: { word: string, meaning: string, example: string }[] = [];
-    const requiringConfirmation: { word: string, meaning: string, example: string }[] = [];
-    let duplicateCount = 0;
-
-    for (const item of validWords) {
-      const cleanWord = item.word.trim().toLowerCase();
-
-      if (customWords.some(w => w.word === cleanWord) || newCustomWords.some(w => w.word === cleanWord)) {
-        duplicateCount++;
-        continue;
-      }
-
-      if (COMMON_WORDS.has(cleanWord)) {
-        requiringConfirmation.push({ word: cleanWord, meaning: item.meaning.trim(), example: item.example.trim() });
-      } else {
-        newCustomWords.push({ word: cleanWord, meaning: item.meaning.trim(), example: item.example.trim() });
-      }
-    }
-
-    if (newCustomWords.length > 0) {
-      if (isAdminAuthenticated) {
-        // Admins save to Firestore shared_words
-        const savePromises = newCustomWords.map(w =>
-          FirebaseFirestore.setDocument({
-            reference: 'shared_words/' + w.word.replace(/\s+/g, '_'),
-            data: w
-          })
-        );
-        await Promise.all(savePromises);
-        setSharedWords(prev => [...prev, ...newCustomWords]);
-      } else {
-        // Regular users (if they somehow access this) save to localStorage
-        setCustomWords(prev => [...prev, ...newCustomWords]);
-      }
-    }
-
-    if (requiringConfirmation.length > 0) {
-      setWordsToConfirm(requiringConfirmation);
-      setConfirmModalOpen(true);
-    } else {
-      setBulkWords(Array.from({ length: 2 }, () => ({ word: '', meaning: '', example: '' })));
-      if (duplicateCount > 0) {
-        setAlertMessage(`${duplicateCount} word(s) were skipped because they are already recognized.`);
-      } else if (newCustomWords.length > 0) {
-        setAlertMessage(`Successfully added ${newCustomWords.length} word(s) ${isAdminAuthenticated ? 'to Global Dictionary' : 'to your dictionary'}.`);
-      }
-    }
-  };
 
   const confirmAddWord = () => {
     setCustomWords(prev => [...prev, ...wordsToConfirm]);
@@ -1038,23 +946,7 @@ export default function App() {
     setAlertMessage(`Successfully added words.`);
   };
 
-  const addBulkWordRow = () => {
-    if (bulkWords.length < 10) {
-      setBulkWords(prev => [...prev, { word: '', meaning: '', example: '' }]);
-    }
-  };
 
-  const removeBulkWordRow = (index: number) => {
-    setBulkWords(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const updateBulkWord = (index: number, field: 'word' | 'meaning' | 'example', value: string) => {
-    setBulkWords(prev => {
-      const newBulk = [...prev];
-      newBulk[index] = { ...newBulk[index], [field]: value };
-      return newBulk;
-    });
-  };
 
   const removeCustomWord = (word: string) => {
     setCustomWords(prev => prev.filter(w => w.word !== word));
@@ -1248,7 +1140,7 @@ export default function App() {
       if (Capacitor.isNativePlatform()) {
         // Native Android / iOS — uses device TTS engine
         const voiceIndex = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
-        await TextToSpeech.stop(); 
+        await TextToSpeech.stop();
         await TextToSpeech.speak({
           text: word,
           lang: 'en-US',
@@ -1344,6 +1236,7 @@ export default function App() {
     setDictLoading(true);
     setDictError('');
     setDictResult(null);
+    setHindiTranslation(null);
     try {
       const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(query)}`);
       if (!res.ok) {
@@ -1369,119 +1262,110 @@ export default function App() {
     }
   };
 
-  const handleChangePin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newAdminPin.length < 4) {
-      setPinChangeMessage('PIN must be at least 4 characters.');
+  const handleTranslateDict = async () => {
+    if (!isPremium) {
+      setSubscriptionModalOpen(true);
       return;
     }
-    setAdminPin(newAdminPin);
-    setNewAdminPin('');
-    setPinChangeMessage('PIN successfully changed!');
-    setTimeout(() => setPinChangeMessage(''), 3000);
-  };
+    if (!dictResult || isTranslating) return;
 
-  const handleBulkImport = async () => {
-    if (!bulkImportText.trim()) return;
-
-    setIsImporting(true);
+    setIsTranslating(true);
     try {
-      const existingWords = new Set(sharedWords.map(w => w.word.toLowerCase()));
-      const lines = bulkImportText.split('\n').filter(line => line.trim());
-      const wordsToSave: { word: string, meaning: string, example: string }[] = [];
-      let skippedCount = 0;
+      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+      const prompt = `Translate this English dictionary entry to Hindi in a simple, readable format. 
+      Word: ${dictResult.word}
+      Phonetic: ${dictResult.phonetic || ''}
+      Meanings: ${JSON.stringify(dictResult.meanings.map(m => ({ pos: m.partOfSpeech, def: m.definitions[0].definition, ex: m.definitions[0].example })))}
+      
+      Respond in PLAIN TEXT only. Structure like this:
+      Arth: [Hindi Meaning]
+      Vyakarn: [Part of Speech]
+      Vibaran: [Quick Hindi Description]
+      Udaharan: [Hindi Example Sentence]`;
 
-      lines.forEach(line => {
-        const [word, meaning, example] = line.split('|').map(s => s.trim());
-        if (word && meaning) {
-          const lWord = word.toLowerCase();
-          if (existingWords.has(lWord)) {
-            skippedCount++;
-            return;
-          }
-          wordsToSave.push({
-            word: lWord,
-            meaning: meaning || 'Meaning not provided',
-            example: example || 'Example not provided'
-          });
-          existingWords.add(lWord); // prevent duplicates within the same bulk import
-        }
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          messages: [{ role: 'system', content: 'You are a translator.' }, { role: 'user', content: prompt }],
+        })
       });
 
-      if (wordsToSave.length === 0) {
-        setAlertMessage(skippedCount > 0
-          ? `All ${skippedCount} words already exist in the Global Dictionary.`
-          : "No valid words found. Format: Word | Meaning | Example");
+      const data = await response.json();
+      setHindiTranslation(data.choices?.[0]?.message?.content);
+    } catch (err) {
+      setAlertMessage("Translation failed. Try again.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+
+
+
+
+  const handleSubscribe = async (packageType: 'monthly' | 'yearly') => {
+    try {
+      const offerings = await Purchases.getOfferings();
+      // Use the specific offering from your screenshot
+      const currentOffering = offerings.all['ofrng20a1dd3978'] || offerings.current;
+      
+      if (!currentOffering) {
+        setAlertMessage("Offerings not found. Please check RevenueCat dashboard.");
         return;
       }
 
-      // Batch Save (one by one for now but with Promise.all for speed)
-      const batchSize = 100;
-      for (let i = 0; i < wordsToSave.length; i += batchSize) {
-        const chunk = wordsToSave.slice(i, i + batchSize);
-        await Promise.all(chunk.map(w =>
-          FirebaseFirestore.setDocument({
-            reference: 'shared_words/' + w.word,
-            data: w
-          })
-        ));
-      }
+      const pkg = currentOffering.availablePackages.find(p => 
+        (packageType === 'monthly' && p.packageType === PACKAGE_TYPE.MONTHLY) ||
+        (packageType === 'yearly' && p.packageType === PACKAGE_TYPE.ANNUAL)
+      );
 
-      const msg = `Successfully imported ${wordsToSave.length} words! ✨` + (skippedCount > 0 ? ` (${skippedCount} duplicates skipped)` : "");
-      setAlertMessage(msg);
-      setBulkImportText('');
-
-      // Update local shared words state
-      const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'shared_words' });
-      if (snapshots) setSharedWords(snapshots.map(s => s.data as any));
-
-    } catch (err) {
-      console.error('Bulk import error:', err);
-      setAlertMessage('Failed to import words. Check your connection.');
-    } finally {
-      setIsImporting(false);
-    }
-  };
-
-  const handleSubscribe = async (type: 'monthly' | 'yearly') => {
-    if (!Capacitor.isNativePlatform()) {
-      setAlertMessage("Payments are only available on the Android app.");
-      return;
-    }
-
-    try {
-      const offerings = await Purchases.getOfferings();
-      if (offerings.current !== null && offerings.current.availablePackages.length !== 0) {
-        // Find the package based on type
-        const pkg = offerings.current.availablePackages.find(p => 
-          type === 'monthly' ? p.packageType === PACKAGE_TYPE.MONTHLY : p.packageType === PACKAGE_TYPE.ANNUAL
-        );
-
-        if (pkg) {
-          const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg });
-          if (customerInfo.entitlements.active['premium']) {
-            setIsPremium(true);
-            localStorage.setItem('isPremium', 'true');
-            if (user?.uid) {
-              await FirebaseFirestore.setDocument({
-                reference: 'users/' + user.uid,
-                data: { premium: true },
-                merge: true
-              });
-            }
-            setSubscriptionModalOpen(false);
-            setAlertMessage("Welcome to Premium! Your subscription is now active. ✨");
+      if (pkg) {
+        const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg });
+        if (customerInfo.entitlements.active['premium']) {
+          setIsPremium(true);
+          localStorage.setItem('isPremium', 'true');
+          setSubscriptionModalOpen(false);
+          setAlertMessage("Welcome to Premium! 🎉");
+          
+          // Sync with Firestore
+          if (user?.uid) {
+            await FirebaseFirestore.setDocument({
+              reference: 'users/' + user.uid,
+              data: { premium: true },
+              merge: true
+            });
           }
-        } else {
-          setAlertMessage("Subscription plan not found. Please try again later.");
         }
+      } else {
+        setAlertMessage("No active offerings found. Check RevenueCat Dashboard and Play Console Products.");
       }
     } catch (error: any) {
       if (!error.userCancelled) {
-        console.error("Purchase error:", error);
-        setAlertMessage("Subscription failed. Please check your Google Play account.");
+        console.error("Purchase error details:", error);
+        setAlertMessage(`Purchase Error: ${error.message || 'Check Console Setup'}`);
       }
     }
+  };
+
+  const startListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setAlertMessage("Voice search is not supported on this browser/device.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      const text = event.results[0][0].transcript;
+      setAiInput(text);
+      setIsListening(false);
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+    recognition.start();
   };
 
   const handleRestore = async () => {
@@ -1493,7 +1377,7 @@ export default function App() {
     try {
       const info = await Purchases.restorePurchases();
       const customerInfo = (info as any).customerInfo || info;
-      
+
       if (customerInfo?.entitlements?.active['premium']) {
         setIsPremium(true);
         localStorage.setItem('isPremium', 'true');
@@ -1528,22 +1412,20 @@ export default function App() {
         content: m.content
       }));
 
-      const systemInstructionContent = `You are 'Lexi', a premium AI English Language Coach for the LexiQuest app. 
-Your goal is to help users improve their English through natural, friendly, and warm conversation.
-
-RULES:
-1. Be extremely encouraging, friendly, and supportive, like a real human mentor. 
-2. If the user makes a grammar or spelling mistake, gently point it out and provide the correct version in plain text.
-3. Suggest 1-2 advanced vocabulary words or synonyms occasionally to help them grow.
-4. Always end your response with a friendly follow-up question to keep the conversation going.
-5. Keep explanations clear, simple, and conversational.
-6. Use relevant emojis occasionally to feel more "alive" and friendly (e.g., ✨, 📚, 😊).
-7. DO NOT use markdown symbols like asterisks (**) or hashtags (#). Use plain text only for everything.
-8. Focus on helping them sound natural, like a native speaker.`;
+      const systemInstructionContent = `You are 'Lexi', a close friend and a warm English Coach. 
+RULES for Lexi:
+1. Talk like a real friend, very warm and natural. Use casual, friendly language.
+2. Mix a little Hindi/Hinglish in your responses (e.g., "Bilkul sahi!", "Kya baat hai!"). 
+3. Keep responses VERY SHORT and concise (max 2-3 sentences). No long paragraphs.
+4. If the user makes a mistake, gently correct them but keep the vibe chill.
+5. End with a short, friendly question.
+6. Use emojis (😊, ✨, 👍) but don't overdo it.
+7. Understand Hindi/Hinglish queries perfectly.
+8. NEVER use markdown symbols like stars (**) or hashtags. Use plain text only.`;
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
@@ -1599,7 +1481,7 @@ RULES:
           LexiQuest
         </h1>
         <div className="flex items-center gap-2">
-          {!isPremium && !isAdminAuthenticated && (
+          {!isPremium && (
             <button
               onClick={() => setSubscriptionModalOpen(true)}
               className="flex items-center gap-1 text-[10px] font-black text-amber-600 bg-amber-50 px-2.5 py-1.5 rounded-full border border-amber-200 uppercase tracking-tighter"
@@ -1613,6 +1495,15 @@ RULES:
           >
             <UserPlus className="w-4 h-4" />
           </button>
+          {user?.email === MASTER_ADMIN_EMAIL && (
+            <button
+              onClick={() => setAdminAddModalOpen(true)}
+              className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center border border-amber-200"
+              title="Admin: Add Word"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -1640,7 +1531,7 @@ RULES:
         </button>
         <button
           onClick={() => {
-            if (!isPremium && !isAdminAuthenticated) {
+            if (!isPremium) {
               setSubscriptionModalOpen(true);
               return;
             }
@@ -1650,7 +1541,7 @@ RULES:
         >
           <Bot className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Coach</span>
-          {(!isPremium && !isAdminAuthenticated) && (
+          {!isPremium && (
             <Sparkles className="w-2.5 h-2.5 text-amber-500 absolute top-2 right-1/2 translate-x-4 fill-amber-500" />
           )}
         </button>
@@ -1663,7 +1554,7 @@ RULES:
         >
           <BookOpen className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Dict</span>
-          {!isPremium && !isAdminAuthenticated && (
+          {!isPremium && (
             <Lock className="w-2.5 h-2.5 absolute top-2 right-1/2 translate-x-4 text-indigo-300" />
           )}
         </button>
@@ -1677,18 +1568,7 @@ RULES:
           <UserPlus className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Profile</span>
         </button>
-        {isAdminAuthenticated && (
-          <button
-            onClick={() => setActiveTab('admin')}
-            className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 transition-colors ${activeTab === 'admin'
-              ? 'text-indigo-600'
-              : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-          >
-            <Settings className="w-6 h-6" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Admin</span>
-          </button>
-        )}
+
       </nav>
 
       {/* Main Content Area */}
@@ -1706,7 +1586,7 @@ RULES:
                   <p className="text-gray-600">
                     Expand your vocabulary with these commonly misspelled words and your custom dictionary.
                   </p>
-                  {!isPremium && !isAdminAuthenticated && (
+                  {!isPremium && (
                     <button
                       onClick={() => setSubscriptionModalOpen(true)}
                       className="mt-4 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
@@ -1737,30 +1617,24 @@ RULES:
               {/* Search Box */}
               <div className="mb-8 relative group">
                 <div className="relative">
-                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${isPremium || isAdminAuthenticated ? 'text-gray-400' : 'text-indigo-300'}`} />
+                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${isPremium ? 'text-gray-400' : 'text-indigo-300'}`} />
                   <input
                     type="text"
                     value={learnSearchQuery}
-                    onChange={(e) => {
-                      if (isPremium || isAdminAuthenticated) {
-                        setLearnSearchQuery(e.target.value);
-                      } else {
-                        setSubscriptionModalOpen(true);
-                      }
-                    }}
-                    placeholder={isPremium || isAdminAuthenticated ? "Search words or meanings..." : "Unlock Search with Premium"}
-                    readOnly={!isPremium && !isAdminAuthenticated}
+                    onChange={(e) => setLearnSearchQuery(e.target.value)}
+                    placeholder={isPremium ? "Search words or meanings..." : "Unlock Search with Premium"}
+                    readOnly={!isPremium}
                     className={`w-full pl-12 pr-4 py-4 bg-white border rounded-2xl shadow-sm outline-none transition-all ${isPremium || isAdminAuthenticated
                       ? 'border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10'
                       : 'border-indigo-100 bg-indigo-50/30 cursor-pointer placeholder-indigo-300'
                       }`}
                     onClick={() => {
-                      if (!isPremium && !isAdminAuthenticated) {
+                      if (!isPremium) {
                         setSubscriptionModalOpen(true);
                       }
                     }}
                   />
-                  {(!isPremium && !isAdminAuthenticated) && (
+                  {!isPremium && (
                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
                       <Lock className="w-5 h-5 text-indigo-400" />
                     </div>
@@ -1781,7 +1655,7 @@ RULES:
                     <button
                       key={cat}
                       onClick={() => {
-                        if (isPremium || isAdminAuthenticated) {
+                        if (isPremium) {
                           setSelectedCategory(cat);
                           setLearnPage(0);
                         } else {
@@ -1793,146 +1667,17 @@ RULES:
                         : 'bg-white text-gray-500 border border-gray-100 hover:border-indigo-200'
                         }`}
                     >
-                      {(!isPremium && !isAdminAuthenticated && cat !== 'All') && <Lock className="w-3 h-3" />}
+                      {(!isPremium && cat !== 'All') && <Lock className="w-3 h-3" />}
                       {cat}
                     </button>
                   ))}
                 </div>
-              {!isPremium && !isAdminAuthenticated && (
-                <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
-                  ✨ Subscribe once to unlock search forever
-                </p>
-              )}
-            </div>
-
-              {/* Daily Challenge Card */}
-              {dailyWords.length > 0 && (
-                <div className="mb-10 relative">
-                  <div className="flex items-center justify-between mb-4 px-2">
-                    <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                      <Target className="w-6 h-6 text-indigo-600" /> Daily 5 Challenge
-                    </h3>
-                    <span className="text-xs font-black bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full uppercase tracking-tighter">
-                      {dailyWordsLearned} / 5 Mastered
-                    </span>
-                  </div>
-
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={currentDailyIndex}
-                      drag="x"
-                      dragConstraints={{ left: 0, right: 0 }}
-                      onDragEnd={(_, info) => {
-                        const threshold = 50;
-                        if (info.offset.x < -threshold) {
-                          // Swiped left -> next
-                          if (currentDailyIndex < dailyWords.length - 1) {
-                            setCurrentDailyIndex(prev => prev + 1);
-                          }
-                        } else if (info.offset.x > threshold) {
-                          // Swiped right -> prev
-                          if (currentDailyIndex > 0) {
-                            setCurrentDailyIndex(prev => prev - 1);
-                          }
-                        }
-                      }}
-                      initial={{ opacity: 0, scale: 0.95, x: 20 }}
-                      animate={{ opacity: 1, scale: 1, x: 0 }}
-                      exit={{ opacity: 0, scale: 0.95, x: -20 }}
-                      transition={{ duration: 0.3, ease: "easeOut" }}
-                      className="relative cursor-grab active:cursor-grabbing"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-[2.5rem] blur-2xl" />
-                      <div className="relative bg-white border border-indigo-100 rounded-[2.5rem] p-8 shadow-2xl shadow-indigo-100/50 flex flex-col items-center text-center overflow-hidden">
-                        {/* Decorative Background Icon */}
-                        <div className="absolute -right-8 -top-8 w-32 h-32 bg-indigo-50 rounded-full flex items-center justify-center opacity-50">
-                          <BookOpen className="w-16 h-16 text-indigo-100" />
-                        </div>
-
-                        <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 mb-6 z-10">
-                          <Clock className="w-8 h-8" />
-                        </div>
-
-                        <div className="z-10 mb-8 max-w-sm">
-                          <h4 className="text-4xl font-black text-slate-900 mb-2 capitalize tracking-tight">
-                            {dailyWords[currentDailyIndex].word}
-                          </h4>
-                          <p className="text-lg text-slate-600 font-medium leading-relaxed italic">
-                            "{dailyWords[currentDailyIndex].meaning}"
-                          </p>
-                        </div>
-
-                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 w-full mb-8 text-left z-10">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
-                            <FileText className="w-3 h-3" /> Usage Example
-                          </p>
-                          <p className="text-slate-700 font-medium italic">
-                            {dailyWords[currentDailyIndex].example}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-col w-full gap-4 z-10">
-                          <div className="flex gap-4">
-                            <button
-                              onClick={() => playWord(dailyWords[currentDailyIndex].word)}
-                              className="flex-1 py-4 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-sm hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
-                            >
-                              <Volume2 className="w-5 h-5" /> Speak
-                            </button>
-                            <button
-                              onClick={() => {
-                                // Simple mastery logic for local words
-                                if (dailyWordsLearned < 5) {
-                                  const newLearned = dailyWordsLearned + 1;
-                                  setDailyWordsLearned(newLearned);
-                                  localStorage.setItem('dailyWordsLearned', newLearned.toString());
-                                  addXp(20);
-
-                                  if (newLearned === 5) {
-                                    addXp(100);
-                                    setAlertMessage("🏆 Challenge Complete! You mastered the Daily 5 and earned a +100 XP Bonus!");
-                                  } else {
-                                    setAlertMessage(`Progress: ${newLearned}/5. Keep going! 🔥`);
-                                  }
-                                }
-                              }}
-                              disabled={dailyWordsLearned >= 5 || (currentDailyIndex < dailyWordsLearned)} // Example logic
-                              className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:shadow-none"
-                            >
-                              <CheckCircle className="w-5 h-5" /> {dailyWordsLearned > currentDailyIndex ? 'Mastered' : 'Mark as Mastered'}
-                            </button>
-                          </div>
-
-                          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                            <button
-                              onClick={() => setCurrentDailyIndex(prev => Math.max(0, prev - 1))}
-                              disabled={currentDailyIndex === 0}
-                              className="p-4 text-slate-400 hover:text-indigo-600 disabled:opacity-30 transition-colors"
-                            >
-                              <ChevronLeft className="w-8 h-8" />
-                            </button>
-                            <div className="flex gap-2">
-                              {dailyWords.map((_, idx) => (
-                                <div
-                                  key={idx}
-                                  className={`w-2 h-2 rounded-full transition-all ${idx === currentDailyIndex ? 'w-6 bg-indigo-600' : 'bg-slate-200'}`}
-                                />
-                              ))}
-                            </div>
-                            <button
-                              onClick={() => setCurrentDailyIndex(prev => Math.min(dailyWords.length - 1, prev + 1))}
-                              disabled={currentDailyIndex === dailyWords.length - 1}
-                              className="p-4 text-slate-400 hover:text-indigo-600 disabled:opacity-30 transition-colors"
-                            >
-                              <ChevronLeft className="w-8 h-8 rotate-180" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </AnimatePresence>
-                </div>
-              )}
+                {!isPremium && (
+                  <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
+                    ✨ Subscribe once to unlock search forever
+                  </p>
+                )}
+              </div>
 
               <motion.div
                 className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8 cursor-grab active:cursor-grabbing"
@@ -2019,8 +1764,8 @@ RULES:
                           key={d}
                           onClick={() => setTestDifficulty(d)}
                           className={`flex-1 py-2.5 rounded-xl text-sm font-bold capitalize transition-all ${testDifficulty === d
-                              ? 'bg-white text-indigo-600 shadow-sm'
-                              : 'text-gray-500 hover:text-gray-700'
+                            ? 'bg-white text-indigo-600 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700'
                             }`}
                         >
                           {d}
@@ -2055,7 +1800,7 @@ RULES:
                     {/* Premium Locked Test Mode */}
                     <button
                       onClick={() => {
-                        if (isPremium || isAdminAuthenticated) {
+                        if (isPremium) {
                           startTest('meaning-mcq');
                         } else {
                           setSubscriptionModalOpen(true);
@@ -2068,7 +1813,7 @@ RULES:
                     >
                       <GraduationCap className="w-6 h-6" />
                       Meaning & Context
-                      {(!isPremium && !isAdminAuthenticated) && (
+                      {!isPremium && (
                         <Lock className="w-4 h-4 absolute top-2 right-2 text-indigo-300" />
                       )}
                     </button>
@@ -2355,7 +2100,7 @@ RULES:
                           <Star className={`w-3.5 h-3.5 ${isPremium ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
                           {isPremium ? 'Premium Member' : 'Free Explorer'}
                         </p>
-                        <button 
+                        <button
                           onClick={async () => {
                             if (!user) return;
                             if (Capacitor.isNativePlatform()) {
@@ -2415,6 +2160,65 @@ RULES:
                   </div>
                   <p className="text-2xl font-black text-slate-900">{streak} Days</p>
                   <p className="text-[10px] font-bold text-slate-400 mt-2 whitespace-nowrap">Don't break the chain!</p>
+                </div>
+              </div>
+
+              {/* Progress Analytics Graph */}
+              <div className="mb-8">
+                <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
+                  <BarChart3 className="w-6 h-6 text-indigo-600" /> Weekly Learning
+                </h3>
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm">
+                  <div className="flex items-end justify-between h-32 gap-2">
+                    {xpHistory.map((val, i) => {
+                      const maxVal = Math.max(...xpHistory, 100);
+                      const height = (val / maxVal) * 100;
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                          <div 
+                            className="w-full bg-indigo-100 rounded-t-lg relative group transition-all"
+                            style={{ height: `${height}%`, minHeight: '4px' }}
+                          >
+                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                              {val} XP
+                            </div>
+                            <div className={`absolute inset-0 bg-indigo-600 rounded-t-lg transition-transform origin-bottom ${height > 0 ? 'scale-y-100' : 'scale-y-0'}`} />
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                            {['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Global Leaderboard Section */}
+              <div className="mb-8">
+                <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
+                  <Trophy className="w-6 h-6 text-amber-500" /> Global Leaderboard
+                </h3>
+                <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm">
+                  {leaderboard.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 font-bold">Loading Rankings...</div>
+                  ) : (
+                    leaderboard.map((u, i) => (
+                      <div key={i} className={`flex items-center gap-4 px-6 py-4 border-b border-slate-50 last:border-none ${user?.displayName === u.name ? 'bg-indigo-50/50' : ''}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${i === 0 ? 'bg-amber-100 text-amber-600' : i === 1 ? 'bg-slate-100 text-slate-600' : i === 2 ? 'bg-orange-100 text-orange-600' : 'text-slate-400'}`}>
+                          {i + 1}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-bold text-slate-900 truncate">{u.name || "Explorer"}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase">Level {u.level || 1}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-black text-indigo-600">{u.xp?.toLocaleString()}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">XP Points</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -2501,6 +2305,23 @@ RULES:
                   <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
                 </button>
                 <button
+                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 dark:border-slate-800"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 dark:bg-slate-800 rounded-xl flex items-center justify-center text-blue-600">
+                      {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+                    </div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                      {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
+                    </span>
+                  </div>
+                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${theme === 'dark' ? 'bg-indigo-600' : 'bg-slate-200'}`}>
+                    <div className={`w-4 h-4 bg-white rounded-full transition-transform ${theme === 'dark' ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </div>
+                </button>
+
+                <button
                   onClick={() => setSpeechSettingsOpen(true)}
                   className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
                 >
@@ -2550,7 +2371,7 @@ RULES:
                   </div>
                 </button>
               </div>
-              
+
               <div className="text-center mb-10">
                 <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">LexiQuest v1.1</p>
               </div>
@@ -2652,15 +2473,6 @@ RULES:
                         )}
                       </div>
                       <div className="flex items-center gap-2">
-                        {isAdminAuthenticated && (
-                          <button
-                            onClick={() => handleAddToGlobal(dictResult)}
-                            disabled={isImporting}
-                            className="bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1.5"
-                          >
-                            <Plus className="w-3 h-3" /> {isImporting ? 'Adding...' : 'Add to Global'}
-                          </button>
-                        )}
                         {dictAudio && (
                           <button
                             onClick={() => dictAudio.play()}
@@ -2672,6 +2484,40 @@ RULES:
                         )}
                       </div>
                     </div>
+
+                  {/* Translate to Hindi Feature */}
+                  <div className="mt-4 px-5">
+                    <button
+                      onClick={handleTranslateDict}
+                      disabled={isTranslating}
+                      className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold transition-all shadow-md ${isTranslating ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-lg active:scale-95'}`}
+                    >
+                      {isTranslating ? (
+                        <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <Languages className="w-5 h-5" />
+                          {hindiTranslation ? 'Refresh Hindi Translation' : 'Translate to Hindi'}
+                          {!isPremium && <Lock className="w-4 h-4 ml-1" />}
+                        </>
+                      )}
+                    </button>
+
+                    {hindiTranslation && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-4 bg-amber-50 border border-amber-200 p-5 rounded-2xl"
+                      >
+                        <div className="flex items-center gap-2 mb-2 text-amber-700 font-black uppercase text-[10px] tracking-widest">
+                          <CheckCircle className="w-4 h-4" /> Hindi Translation
+                        </div>
+                        <p className="whitespace-pre-wrap font-sans text-base text-slate-800 leading-relaxed font-semibold">
+                          {hindiTranslation}
+                        </p>
+                      </motion.div>
+                    )}
+                  </div>
                   </div>
 
                   <div className="p-5 space-y-6">
@@ -2708,8 +2554,8 @@ RULES:
                             ))}
                           </ol>
 
-                          {/* Synonyms & Antonyms (Premium/Admin Feature) */}
-                          {(!isPremium && !isAdminAuthenticated) ? (
+                          {/* Synonyms & Antonyms (Premium Feature) */}
+                          {!isPremium ? (
                             <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex flex-col items-center text-center">
                               <Lock className="w-5 h-5 text-indigo-400 mb-2" />
                               <p className="text-xs font-bold text-indigo-900 mb-1">Unlock Synonyms & Antonyms</p>
@@ -2792,7 +2638,7 @@ RULES:
           </div>
         )}
 
-        {activeTab === 'ai-coach' && (isPremium || isAdminAuthenticated) && (
+        {activeTab === 'ai-coach' && isPremium && (
           <div className="flex-1 max-w-2xl mx-auto w-full flex flex-col h-[calc(100vh-120px)] bg-slate-50">
             {/* AI Header */}
             <div className="p-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
@@ -2808,7 +2654,7 @@ RULES:
                   </div>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setAiChat([])}
                 className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                 title="Clear Chat"
@@ -2830,10 +2676,10 @@ RULES:
                   </p>
                   <div className="mt-6 grid grid-cols-1 gap-2 w-full max-w-[240px]">
                     {["How to improve vocabulary?", "Explain 'perseverance'", "Check my grammar: I goes home"].map((suggestion, i) => (
-                      <button 
+                      <button
                         key={i}
                         onClick={() => handleAiSendMessage(suggestion)}
-                        className="p-3 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-600 hover:border-indigo-600 hover:text-indigo-600 transition-all text-left shadow-sm"
+                        className="p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:border-indigo-600 hover:text-indigo-600 transition-all text-left shadow-sm"
                       >
                         {suggestion}
                       </button>
@@ -2843,14 +2689,13 @@ RULES:
               ) : (
                 aiChat.map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`relative max-w-[85%] p-3.5 rounded-2xl text-xs leading-relaxed group ${
-                      msg.role === 'user' 
-                        ? 'bg-indigo-600 text-white font-medium rounded-tr-none shadow-md' 
-                        : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none font-medium shadow-sm'
-                    }`}>
+                    <div className={`relative max-w-[85%] p-5 rounded-2xl text-base leading-relaxed group ${msg.role === 'user'
+                      ? 'bg-indigo-600 text-white font-medium rounded-tr-none shadow-md'
+                      : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none font-medium shadow-sm'
+                      }`}>
                       {msg.content}
                       {msg.role === 'model' && (
-                        <button 
+                        <button
                           onClick={() => playWord(msg.content)}
                           className="absolute -right-8 bottom-0 p-1.5 text-slate-400 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
                           title="Speak response"
@@ -2877,18 +2722,25 @@ RULES:
             {/* AI Input */}
             <div className="fixed bottom-16 left-0 right-0 p-4 bg-white border-t border-slate-200 z-10">
               <div className="max-w-2xl mx-auto">
-                <form 
+                <form
                   onSubmit={(e) => { e.preventDefault(); handleAiSendMessage(); }}
                   className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-1 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all"
                 >
-                  <input 
+                  <input
                     type="text"
                     value={aiInput}
                     onChange={(e) => setAiInput(e.target.value)}
                     placeholder="Message your coach..."
-                    className="flex-1 bg-transparent border-none outline-none px-3 py-2 text-xs font-bold text-slate-900 placeholder-slate-400"
+                    className="flex-1 bg-transparent border-none outline-none px-3 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400"
                   />
-                  <button 
+                  <button
+                    type="button"
+                    onClick={startListening}
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
+                  <button
                     type="submit"
                     disabled={!aiInput.trim() || isAiLoading}
                     className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md active:scale-90 shrink-0"
@@ -2901,303 +2753,7 @@ RULES:
           </div>
         )}
 
-        {activeTab === 'admin' && isAdminAuthenticated && (
-          <div className="flex-1 p-6 lg:p-10 overflow-y-auto">
-            <div className="max-w-3xl mx-auto">
-              <div className="mb-8">
-                <h2 className="text-3xl font-bold mb-2">Dictionary Admin Panel</h2>
-                <p className="text-gray-600">
-                  Manage global dictionary and authorized administrators.
-                </p>
-              </div>
 
-              {/* Admin Management Section */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-indigo-600" />
-                  Manage Administrators
-                </h3>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!newAdminEmail.trim() || !newAdminEmail.includes('@')) return;
-
-                    const updatedAdmins = [...adminEmails, newAdminEmail.trim().toLowerCase()];
-                    try {
-                      await FirebaseFirestore.setDocument({
-                        reference: 'config/admins',
-                        data: { emails: updatedAdmins },
-                        merge: true
-                      });
-                      setAdminEmails(updatedAdmins);
-                      setNewAdminEmail('');
-                      setAlertMessage(`Successfully added ${newAdminEmail} as Admin.`);
-                    } catch (err) {
-                      console.error('Failed to update admins:', err);
-                    }
-                  }}
-                  className="flex flex-col sm:flex-row gap-3 mb-6"
-                >
-                  <input
-                    type="email"
-                    value={newAdminEmail}
-                    onChange={(e) => setNewAdminEmail(e.target.value)}
-                    placeholder="Friend's email address"
-                    className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newAdminEmail.trim()}
-                    className="px-6 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors whitespace-nowrap"
-                  >
-                    Add Admin
-                  </button>
-                </form>
-
-                <div className="space-y-2">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Current Admins</p>
-                  <div className="flex flex-wrap gap-2">
-                    <span className="px-3 py-1 bg-purple-50 text-purple-700 text-xs font-bold rounded-full border border-purple-200">sandeepkumarspj290@gmail.com (Super)</span>
-                    {adminEmails.map(email => (
-                      <div key={email} className="flex items-center gap-1 px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-200">
-                        <span>{email}</span>
-                        <button
-                          onClick={async () => {
-                            const updated = adminEmails.filter(e => e !== email);
-                            await FirebaseFirestore.setDocument({
-                              reference: 'config/admins',
-                              data: { emails: updated },
-                              merge: true
-                            });
-                            setAdminEmails(updated);
-                          }}
-                          className="hover:text-red-500 transition-colors"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Change PIN Form */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Lock className="w-5 h-5 text-indigo-600" />
-                  Change Admin PIN
-                </h3>
-                <form
-                  onSubmit={handleChangePin}
-                  className="flex flex-col sm:flex-row gap-3"
-                >
-                  <input
-                    type="password"
-                    value={newAdminPin}
-                    onChange={(e) => setNewAdminPin(e.target.value)}
-                    placeholder="Enter new PIN"
-                    className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newAdminPin.trim()}
-                    className="px-6 py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                  >
-                    Update PIN
-                  </button>
-                </form>
-                {pinChangeMessage && (
-                  <p className={`mt-3 text-sm font-medium ${pinChangeMessage.includes('successfully') ? 'text-green-600' : 'text-red-600'}`}>
-                    {pinChangeMessage}
-                  </p>
-                )}
-              </div>
-
-
-              {/* Add Word Form */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold">Bulk Add Words (Up to 2)</h3>
-                </div>
-                <form
-                  onSubmit={handleAddCustomWordSubmit}
-                  className="flex flex-col gap-4"
-                >
-                  <div className="space-y-4">
-                    {bulkWords.map((item, index) => (
-                      <div key={index} className="flex flex-col md:flex-row gap-3 p-4 bg-gray-50 border border-gray-200 rounded-xl relative items-start md:items-center">
-                        <div className="flex items-center justify-between w-full md:w-auto md:min-w-[80px]">
-                          <span className="text-sm font-bold text-gray-500 uppercase tracking-wider">Word {index + 1}</span>
-                          {bulkWords.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeBulkWordRow(index)}
-                              className="md:hidden p-1 text-gray-400 hover:text-red-500 transition-colors"
-                              title="Remove Word"
-                            >
-                              <X className="w-5 h-5" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full flex-1">
-                          <input
-                            type="text"
-                            value={item.word}
-                            onChange={(e) => updateBulkWord(index, 'word', e.target.value)}
-                            placeholder="Word"
-                            className="w-full px-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                          />
-                          <input
-                            type="text"
-                            value={item.meaning}
-                            onChange={(e) => updateBulkWord(index, 'meaning', e.target.value)}
-                            placeholder="Hindi Meaning"
-                            className="w-full px-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                          />
-                          <input
-                            type="text"
-                            value={item.example}
-                            onChange={(e) => updateBulkWord(index, 'example', e.target.value)}
-                            placeholder="English Example"
-                            className="w-full px-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                          />
-                        </div>
-                        {bulkWords.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeBulkWordRow(index)}
-                            className="hidden md:block p-2 text-gray-400 hover:text-red-500 transition-colors shrink-0"
-                            title="Remove Word"
-                          >
-                            <X className="w-5 h-5" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-2">
-                    <button
-                      type="button"
-                      onClick={addBulkWordRow}
-                      disabled={bulkWords.length >= 2}
-                      className="w-full sm:w-auto px-4 py-3 text-indigo-600 font-medium bg-indigo-50 rounded-xl hover:bg-indigo-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Add Another Word
-                    </button>
-
-                    <button
-                      type="submit"
-                      disabled={!bulkWords.some(w => w.word.trim() && w.meaning.trim() && w.example.trim())}
-                      className="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
-                    >
-                      <Save className="w-5 h-5" />
-                      Save Words
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* Bulk Import Section */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
-                <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-indigo-600" />
-                  Bulk Import (Max 1000)
-                </h3>
-                <p className="text-sm text-gray-500 mb-4">
-                  Paste words here. Format: <code className="bg-gray-100 px-1 rounded text-indigo-600">Word | Meaning | Example</code> (one per line)
-                </p>
-                <textarea
-                  value={bulkImportText}
-                  onChange={(e) => setBulkImportText(e.target.value)}
-                  placeholder={"Apple | Seb | An apple a day keeps the doctor away.\nBanana | Kela | Eat a banana for energy."}
-                  className="w-full h-48 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none mb-4 font-mono text-sm"
-                />
-                <button
-                  onClick={handleBulkImport}
-                  disabled={isImporting || !bulkImportText.trim()}
-                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                >
-                  {isImporting ? 'Importing...' : <><Save className="w-5 h-5" /> Start Bulk Import</>}
-                </button>
-              </div>
-
-              {/* Custom Words List */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-6 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <h3 className="text-lg font-semibold flex items-center gap-2">
-                    <Book className="w-5 h-5 text-indigo-600" />
-                    Custom Dictionary ({customWords.length})
-                  </h3>
-                  {customWords.length > 0 && (
-                    <button
-                      onClick={() => setClearConfirmModalOpen(true)}
-                      className="text-sm text-red-600 hover:text-red-700 font-medium whitespace-nowrap"
-                    >
-                      Clear All
-                    </button>
-                  )}
-                </div>
-
-                {customWords.length === 0 ? (
-                  <div className="p-12 text-center text-gray-500">
-                    <Book className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-                    <p>Your custom dictionary is empty.</p>
-                    <p className="text-sm mt-1">Add words above.</p>
-                  </div>
-                ) : (
-                  <ul className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
-                    {[...customWords].sort((a, b) => a.word.localeCompare(b.word)).map(item => (
-                      <li key={item.word} className="p-4 flex justify-between items-start hover:bg-gray-50 transition-colors">
-                        <div>
-                          <span className="font-mono text-gray-800 font-bold text-lg">{item.word}</span>
-                          <p className="text-sm text-gray-600 mt-1"><span className="font-semibold text-indigo-600">Meaning:</span> {item.meaning}</p>
-                          <p className="text-sm text-gray-500 italic mt-0.5"><span className="font-semibold text-indigo-600 not-italic">Example:</span> "{item.example}"</p>
-                        </div>
-                        <button
-                          onClick={() => removeCustomWord(item.word)}
-                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors ml-4"
-                          title="Remove word"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* Premium Users List */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-                  Premium Users ({premiumUsers.length})
-                </h3>
-                <div className="space-y-3">
-                  {premiumUsers.length === 0 ? (
-                    <p className="text-sm text-gray-400 italic">No premium users found.</p>
-                  ) : (
-                    premiumUsers.map((u, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 text-xs font-bold">
-                            {u.email?.[0]?.toUpperCase() || 'U'}
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-800">{u.email}</p>
-                            <p className="text-[10px] text-slate-400">UID: {u.uid}</p>
-                          </div>
-                        </div>
-                        <span className="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold rounded-md uppercase">Active</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Modals Overlay */}
         {(pinModalOpen || alertMessage || confirmModalOpen || clearConfirmModalOpen || reminderPopoverOpen || deleteModalOpen) && (
@@ -3480,7 +3036,7 @@ RULES:
                   >
                     <div className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">Exclusive Offer</div>
                     <p className="text-[10px] font-black text-amber-600 uppercase mb-1">Trial Plan</p>
-                    <p className="text-2xl font-black text-slate-900">₹2 <span className="text-xs font-bold text-slate-400">/ 1 Day</span></p>
+                    <p className="text-2xl font-black text-slate-900">₹2 <span className="text-xs font-bold text-slate-400">/ 3 Days</span></p>
                     <p className="text-[10px] font-bold text-indigo-600 mt-2">Then ₹199/month (Auto-pay) →</p>
                   </button>
                   <button
@@ -3499,7 +3055,7 @@ RULES:
                     <Info className="w-3.5 h-3.5 text-indigo-500" /> Subscription Details
                   </p>
                   <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Start your 1-day trial for just <span className="font-bold text-indigo-600">₹2</span>. After 24 hours, you will be automatically charged <span className="font-bold text-indigo-600">₹199/month</span> unless cancelled in Google Play. Manage or cancel anytime.
+                    Start your 3-day trial for just <span className="font-bold text-indigo-600">₹2</span>. After 72 hours, you will be automatically charged <span className="font-bold text-indigo-600">₹199/month</span> unless cancelled in Google Play. Manage or cancel anytime.
                   </p>
                 </div>
 
@@ -3553,6 +3109,198 @@ RULES:
           )}
         </AnimatePresence>
 
+
+        {/* Daily 5 Floating Button */}
+        {activeTab === 'learn' && dailyWords.length > 0 && (
+          <motion.button
+            initial={{ scale: 0, y: 100 }}
+            animate={{ scale: 1, y: 0 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setDailyWordsModalOpen(true)}
+            className="fixed bottom-24 right-6 z-[60] w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center overflow-hidden group"
+          >
+            <div className="absolute inset-0 bg-gradient-to-tr from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <Target className="w-7 h-7 relative z-10" />
+            {dailyWordsLearned < 5 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-pink-500 border-2 border-white rounded-full flex items-center justify-center text-[10px] font-black">
+                {5 - dailyWordsLearned}
+              </span>
+            )}
+          </motion.button>
+        )}
+
+        {/* Daily 5 Modal */}
+        <AnimatePresence>
+          {dailyWordsModalOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDailyWordsModalOpen(false)}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[80] flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-sm"
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-xl font-black text-white flex items-center gap-2">
+                    <Target className="w-6 h-6 text-indigo-400" /> Daily Challenge
+                  </h3>
+                  <button
+                    onClick={() => setDailyWordsModalOpen(false)}
+                    className="p-2 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentDailyIndex}
+                    initial={{ opacity: 0, scale: 0.95, x: 20 }}
+                    animate={{ opacity: 1, scale: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, x: -20 }}
+                    transition={{ duration: 0.3 }}
+                    className="bg-white border border-indigo-100 rounded-[2.5rem] p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden relative"
+                  >
+                    <div className="absolute -right-8 -top-8 w-32 h-32 bg-indigo-50 rounded-full flex items-center justify-center opacity-50">
+                      <BookOpen className="w-16 h-16 text-indigo-100" />
+                    </div>
+
+                    <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 mb-6 z-10">
+                      <Clock className="w-8 h-8" />
+                    </div>
+
+                    <div className="z-10 mb-8 w-full">
+                      <h4 className="text-4xl font-black text-slate-900 mb-2 capitalize tracking-tight">
+                        {dailyWords[currentDailyIndex].word}
+                      </h4>
+                      <p className="text-lg text-slate-600 font-medium leading-relaxed italic">
+                        "{dailyWords[currentDailyIndex].meaning}"
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 w-full mb-8 text-left z-10">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                        <FileText className="w-3 h-3" /> Usage Example
+                      </p>
+                      <p className="text-slate-700 font-medium italic">
+                        {dailyWords[currentDailyIndex].example}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col w-full gap-4 z-10">
+                      <div className="flex gap-4">
+                        <button
+                          onClick={() => playWord(dailyWords[currentDailyIndex].word)}
+                          className="flex-1 py-4 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-sm hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
+                        >
+                          <Volume2 className="w-5 h-5" /> Speak
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (dailyWordsLearned < 5) {
+                              const newLearned = dailyWordsLearned + 1;
+                              setDailyWordsLearned(newLearned);
+                              localStorage.setItem('dailyWordsLearned', newLearned.toString());
+                              addXp(20);
+                              if (newLearned === 5) {
+                                addXp(100);
+                                setAlertMessage("🏆 Challenge Complete! +100 XP Bonus!");
+                              }
+                            }
+                          }}
+                          disabled={dailyWordsLearned >= 5 || (currentDailyIndex < dailyWordsLearned)}
+                          className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg flex items-center justify-center gap-2 disabled:bg-slate-300"
+                        >
+                          <CheckCircle className="w-5 h-5" /> {dailyWordsLearned > currentDailyIndex ? 'Mastered' : 'Master'}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                        <button
+                          onClick={() => setCurrentDailyIndex(prev => Math.max(0, prev - 1))}
+                          disabled={currentDailyIndex === 0}
+                          className="p-4 text-slate-400 hover:text-indigo-600 disabled:opacity-30"
+                        >
+                          <ChevronLeft className="w-8 h-8" />
+                        </button>
+                        <div className="flex gap-2">
+                          {dailyWords.map((_, idx) => (
+                            <div
+                              key={idx}
+                              className={`w-2 h-2 rounded-full transition-all ${idx === currentDailyIndex ? 'w-6 bg-indigo-600' : 'bg-slate-200'}`}
+                            />
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => setCurrentDailyIndex(prev => Math.min(dailyWords.length - 1, prev + 1))}
+                          disabled={currentDailyIndex === dailyWords.length - 1}
+                          className="p-4 text-slate-400 hover:text-indigo-600 disabled:opacity-30"
+                        >
+                          <ChevronLeft className="w-8 h-8 rotate-180" />
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Admin Minimal Add Word Modal */}
+        {adminAddModalOpen && (
+          <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-6 backdrop-blur-sm">
+            <div className="bg-white rounded-[2rem] w-full max-w-md p-8 shadow-2xl animate-in fade-in zoom-in duration-300">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-black text-slate-900">Add Global Word</h3>
+                <button onClick={() => setAdminAddModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Word"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                  value={newWordData.word}
+                  onChange={e => setNewWordData({ ...newWordData, word: e.target.value })}
+                />
+                <input
+                  type="text"
+                  placeholder="Meaning"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                  value={newWordData.meaning}
+                  onChange={e => setNewWordData({ ...newWordData, meaning: e.target.value })}
+                />
+                <textarea
+                  placeholder="Example Sentence"
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 h-24"
+                  value={newWordData.example}
+                  onChange={e => setNewWordData({ ...newWordData, example: e.target.value })}
+                />
+                <select
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                  value={newWordData.category}
+                  onChange={e => setNewWordData({ ...newWordData, category: e.target.value })}
+                >
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <button
+                  onClick={handleAdminAddWord}
+                  disabled={isAiLoading}
+                  className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {isAiLoading ? 'Adding...' : 'Save Word'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </main>
     </div>
