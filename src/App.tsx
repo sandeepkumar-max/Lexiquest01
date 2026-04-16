@@ -504,6 +504,7 @@ function App() {
     }
   }, [authLoading]);
 
+  useEffect(() => {
     const listener = FirebaseAuthentication.addListener('authStateChange', async (result) => {
       setUser(result.user);
       if (result.user) {
