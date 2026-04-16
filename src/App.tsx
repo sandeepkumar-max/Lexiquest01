@@ -504,6 +504,25 @@ function App() {
     };
 
     checkUser();
+
+    // Load available voices for higher quality TTS
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        setAvailableVoices(voices);
+        // Automatically pick a "Premium" sounding voice if not already selected
+        const preferred = voices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) 
+                       || voices.find(v => v.lang.startsWith('en-GB'))
+                       || voices.find(v => v.lang.startsWith('en-US'))
+                       || voices[0];
+        if (preferred && !localStorage.getItem('selectedVoiceURI')) {
+          setSelectedVoiceURI(preferred.voiceURI);
+          localStorage.setItem('selectedVoiceURI', preferred.voiceURI);
+        }
+      }
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
     
     return () => {
       if (typeof emergencyTimer !== 'undefined') clearTimeout(emergencyTimer);
@@ -1398,8 +1417,7 @@ function App() {
     if (!word) return;
     try {
       if (Capacitor.isNativePlatform()) {
-        // Native Android / iOS — uses device TTS engine
-        const voiceIndex = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
+        const vIdx = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
         await TextToSpeech.stop();
         await TextToSpeech.speak({
           text: word,
@@ -1408,25 +1426,15 @@ function App() {
           pitch: 1.0,
           volume: 1.0,
           category: 'ambient',
-          voice: voiceIndex !== -1 ? voiceIndex : undefined
+          voice: vIdx !== -1 ? vIdx : undefined
         });
       } else {
-        // Web browser fallback
-        if (!window.speechSynthesis) {
-          console.warn('Speech synthesis not supported in this browser');
-          return;
-        }
+        if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = 'en-US';
+        const voice = availableVoices.find(v => v.voiceURI === selectedVoiceURI);
+        if (voice) utterance.voice = voice;
         utterance.rate = speechRate;
-        if (selectedVoiceURI) {
-          const voice = availableVoices.find(v => v.voiceURI === selectedVoiceURI);
-          if (voice) utterance.voice = voice;
-        }
-        utterance.onerror = (event) => {
-          console.error('Web speech synthesis error:', event);
-        };
         window.speechSynthesis.speak(utterance);
       }
     } catch (err) {
@@ -2608,35 +2616,107 @@ function App() {
                 </div>
               </div>
 
-              {user?.email === MASTER_ADMIN_EMAIL && (
-                <div className="mb-8 p-6 bg-amber-50 rounded-[2rem] border border-amber-100 shadow-sm">
-                  <div className="flex items-center gap-3 text-amber-600 mb-2">
-                    <Star className="w-5 h-5 fill-amber-500" />
-                    <span className="text-sm font-black uppercase tracking-widest">Admin Ad Bypass</span>
-                  </div>
-                  <p className="text-xs text-amber-800 font-medium leading-relaxed">
-                    Ads are disabled for <b>{user.email}</b> to ensure a smooth administrative experience. 
-                  </p>
-                  
-                  <div className="mt-4 p-3 bg-white/40 rounded-xl border border-amber-200/50">
-                     <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">Current State Diagnostic</p>
-                     <div className="grid grid-cols-2 gap-2 text-[9px] font-medium text-amber-900">
-                        <div>User ID: {user?.uid?.slice(0,8)}...</div>
-                        <div>Premium: {isPremium ? 'YES' : 'NO'}</div>
-                        <div>Ads Init: {adInitialized ? 'YES' : 'NO'}</div>
-                        <div>Ad Ready: {adReady ? 'YES' : 'NO'}</div>
-                        <div className="col-span-2 text-indigo-700">Last Action: {lastAction}</div>
-                     </div>
-                  </div>
-                  
-                  {errorLog.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-amber-200">
-                      <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-2">Interactions / Error Log</p>
-                      <div className="bg-white/50 rounded-xl p-3 font-mono text-[10px] text-amber-900 max-h-32 overflow-y-auto">
-                        {errorLog.map((log, i) => <div key={i} className="mb-1 border-b border-amber-100 pb-1 last:border-none">{log}</div>)}
-                      </div>
+              {/* Settings & Preferences */}
+              <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm mb-8">
+                <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Sliders className="w-4 h-4" /> Preferences
+                  </h3>
+                </div>
+                
+                <button
+                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 dark:border-slate-800 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-active:scale-90 transition-transform">
+                      {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5 transition-all" />}
                     </div>
-                  )}
+                    <span className="font-bold text-slate-700">Display Theme</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-400">{theme === 'light' ? 'Light' : 'Dark'}</span>
+                    <ChevronLeft className="w-4 h-4 text-slate-300 rotate-180" />
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setSpeechSettingsOpen(true)}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-active:scale-90 transition-transform">
+                      <Volume2 className="w-5 h-5" />
+                    </div>
+                    <span className="font-bold text-slate-700">Speech & Voice</span>
+                  </div>
+                  <ChevronLeft className="w-4 h-4 text-slate-300 rotate-180" />
+                </button>
+
+                <button
+                  onClick={() => { setDraftReminderTime(reminderTime); setReminderPopoverOpen(o => !o); }}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-active:scale-90 transition-transform">
+                      <Bell className="w-5 h-5" />
+                    </div>
+                    <span className="font-bold text-slate-700">Daily Notifications</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-indigo-600">{reminderTime}</span>
+                    <ChevronLeft className="w-4 h-4 text-slate-300 rotate-180" />
+                  </div>
+                </button>
+
+                <button
+                  onClick={handleSignOut}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-red-50 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600 group-active:scale-90 transition-transform">
+                      <LogIn className="w-5 h-5 rotate-180" />
+                    </div>
+                    <span className="font-bold text-red-600">Sign Out</span>
+                  </div>
+                </button>
+              </div>
+
+              {user?.email === MASTER_ADMIN_EMAIL && (
+                <div className="mb-8 p-6 bg-slate-100 rounded-[2rem] border border-slate-200 shadow-inner">
+                  <details className="group">
+                    <summary className="flex items-center justify-between cursor-pointer list-none">
+                      <div className="flex items-center gap-3 text-slate-600">
+                        <Star className="w-4 h-4 fill-slate-500" />
+                        <span className="text-sm font-black uppercase tracking-widest">Admin Dashboard</span>
+                      </div>
+                      <ChevronLeft className="w-5 h-5 text-slate-400 rotate-[-90deg] group-open:rotate-[90deg] transition-transform" />
+                    </summary>
+                    
+                    <div className="mt-4 space-y-4">
+                      <div className="p-4 bg-white/60 rounded-2xl border border-slate-200">
+                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 text-center border-b border-slate-100 pb-2">Diagnostic Console</p>
+                         <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-slate-700">
+                            <div className="bg-white p-2 rounded-lg">ID: {user?.uid?.slice(0,8)}...</div>
+                            <div className="bg-white p-2 rounded-lg">Premium: {isPremium ? '✅' : '❌'}</div>
+                            <div className="bg-white p-2 rounded-lg">Ads Init: {adInitialized ? '✅' : '❌'}</div>
+                            <div className="bg-white p-2 rounded-lg">Ad Ready: {adReady ? '✅' : '❌'}</div>
+                         </div>
+                         <div className="mt-3 p-2 bg-indigo-50 rounded-lg text-[10px] text-indigo-700 font-mono">
+                           Last Action: {lastAction}
+                         </div>
+                      </div>
+                      
+                      {errorLog.length > 0 && (
+                        <div className="p-4 bg-white/60 rounded-2xl border border-slate-200">
+                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Live Activity Log</p>
+                          <div className="font-mono text-[10px] text-slate-600 max-h-32 overflow-y-auto space-y-1">
+                            {errorLog.map((log, i) => <div key={i} className="pb-1 border-b border-slate-50 last:border-none">{log}</div>)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 </div>
               )}
 
@@ -2841,13 +2921,11 @@ function App() {
                 </button>
                 <button
                   onClick={handleDeleteAccount}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-rose-100 transition-colors"
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-rose-50 transition-colors text-rose-600 font-bold text-sm"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
-                      <Trash2 className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-rose-600">Delete Account</span>
+                    <Trash2 className="w-5 h-5" />
+                    <span>Permanently Delete Account</span>
                   </div>
                 </button>
               </div>
@@ -3215,42 +3293,43 @@ function App() {
               <div ref={aiChatEndRef} />
             </div>
 
-            {/* AI Input */}
             <div className="fixed bottom-16 left-0 right-0 p-4 bg-white border-t border-slate-200 z-10">
               <div className="max-w-2xl mx-auto">
                 <form
                   onSubmit={(e) => { e.preventDefault(); handleAiSendMessage(); }}
-                  className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-1 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all"
+                  className="flex items-center gap-1.5 sm:gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-1.5 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-500 transition-all"
                 >
                   <input
                     type="text"
                     value={aiInput}
                     onChange={(e) => setAiInput(e.target.value)}
                     placeholder="Message your coach..."
-                    className="flex-1 bg-transparent border-none outline-none px-3 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400"
+                    className="flex-1 bg-transparent border-none outline-none pl-3 pr-1 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400 min-w-0"
                   />
-                  <button
-                    type="button"
-                    onClick={handleStartCall}
-                    className="p-3 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
-                    title="Call Lexi"
-                  >
-                    <Phone className="w-5 h-5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={startListening}
-                    className={`p-3 rounded-xl transition-all ${isListening ? 'bg-rose-100 text-rose-600 animate-pulse' : 'text-slate-400 hover:bg-indigo-50 hover:text-indigo-600'}`}
-                  >
-                    <Mic className="w-5 h-5" />
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!aiInput.trim() || isAiLoading}
-                    className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md active:scale-90 shrink-0"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0 px-1">
+                    <button
+                      type="button"
+                      onClick={handleStartCall}
+                      className="p-2.5 text-indigo-600 hover:bg-white rounded-xl transition-all active:scale-90"
+                      title="Call Lexi"
+                    >
+                      <Phone className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startListening}
+                      className={`p-2.5 rounded-xl transition-all active:scale-90 ${isListening ? 'bg-rose-100 text-rose-600 animate-pulse' : 'text-slate-400 hover:bg-white hover:text-indigo-600'}`}
+                    >
+                      <Mic className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!aiInput.trim() || isAiLoading}
+                      className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center hover:bg-indigo-700 disabled:opacity-30 transition-all shadow-lg shadow-indigo-200 active:scale-90 ml-1"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>
