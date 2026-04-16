@@ -28,7 +28,50 @@ interface DictEntry { word: string; phonetic?: string; phonetics: DictPhonetic[]
 
 const MASTER_ADMIN_EMAIL = 'sandeepkumarspj290@gmail.com';
 
-export default function App() {
+class ErrorBoundary extends React.Component<any, { hasError: boolean, error: any }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-10 text-center bg-white h-screen flex flex-col items-center justify-center">
+          <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
+            <AlertCircle className="w-12 h-12 text-red-600" />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 mb-2">Oops! Something Crashed</h1>
+          <p className="text-slate-500 mb-8 max-w-xs mx-auto text-sm">{this.state.error?.message || 'Unknown Error'}</p>
+          <button 
+            onClick={() => {
+              localStorage.clear();
+              window.location.reload();
+            }}
+            className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-indigo-200"
+          >
+            Reset & Restart
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const safeParseJSON = (key: string, fallback: any) => {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : fallback;
+  } catch (e) {
+    console.warn(`SafeParse failed for ${key}:`, e);
+    return fallback;
+  }
+};
+
+function App() {
   const [activeTab, setActiveTab] = useState<Tab>('learn');
   const [customWords, setCustomWords] = useState<{ word: string, meaning: string, example: string }[]>([]);
   const [sharedWords, setSharedWords] = useState<{ word: string, meaning: string, example: string }[]>([]);
@@ -100,35 +143,22 @@ export default function App() {
   const [xp, setXp] = useState(() => parseInt(localStorage.getItem('xp') || '0'));
   const [level, setLevel] = useState(() => parseInt(localStorage.getItem('level') || '1'));
   const [showLevelUp, setShowLevelUp] = useState(false);
-  const [dailyWords, setDailyWords] = useState<{ word: string, meaning: string, example: string }[]>(() => {
-    const saved = localStorage.getItem('dailyWords');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [currentDailyIndex, setCurrentDailyIndex] = useState(0);
-  const [dailyWordsLearned, setDailyWordsLearned] = useState(() => parseInt(localStorage.getItem('dailyWordsLearned') || '0'));
-  const [lastDailyWordDate, setLastDailyWordDate] = useState(() => localStorage.getItem('lastDailyWordDate') || '');
+  // Achievements (Safe Load)
+  const [badges, setBadges] = useState(() => safeParseJSON('badges', [
+    { id: 'streak-7', title: '7-Day Streak', icon: '🔥', earned: false },
+    { id: 'words-50', title: '50 Words Mastered', icon: '📚', earned: false },
+    { id: 'level-5', title: 'Level 5 Reached', icon: '⭐', earned: false }
+  ]));
 
-  // Daily Missions
-  const [missions, setMissions] = useState(() => {
-    const saved = localStorage.getItem('dailyMissions');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 'correct-10', title: 'Word Wizard', desc: 'Get 10 correct answers', goal: 10, current: 0, reward: 50, completed: false },
-      { id: 'test-2', title: 'Test Taker', desc: 'Complete 2 full tests', goal: 2, current: 0, reward: 100, completed: false },
-      { id: 'dict-3', title: 'Researcher', desc: 'Search 3 words in Dict', goal: 3, current: 0, reward: 30, completed: false }
-    ];
-  });
+  // Daily Words (Safe Load)
+  const [dailyWords, setDailyWords] = useState<{ word: string, meaning: string, example: string }[]>(() => safeParseJSON('dailyWords', []));
 
-  // Achievements
-  const [badges, setBadges] = useState(() => {
-    const saved = localStorage.getItem('badges');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 'streak-7', title: '7-Day Streak', icon: '🔥', earned: false },
-      { id: 'words-50', title: '50 Words Mastered', icon: '📚', earned: false },
-      { id: 'level-5', title: 'Level 5 Reached', icon: '⭐', earned: false }
-    ];
-  });
+  // Daily Missions (Safe Load)
+  const [missions, setMissions] = useState(() => safeParseJSON('dailyMissions', [
+    { id: 'correct-10', title: 'Word Wizard', desc: 'Get 10 correct answers', goal: 10, current: 0, reward: 50, completed: false },
+    { id: 'test-2', title: 'Test Taker', desc: 'Complete 2 full tests', goal: 2, current: 0, reward: 100, completed: false },
+    { id: 'dict-3', title: 'Researcher', desc: 'Search 3 words in Dict', goal: 3, current: 0, reward: 30, completed: false }
+  ]));
 
   // Streak Shield
   const [streakShields, setStreakShields] = useState(() => parseInt(localStorage.getItem('streakShields') || '0'));
@@ -367,7 +397,14 @@ export default function App() {
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
       console.error("Global Error Caught:", event.error);
-      setErrorLog(prev => [...prev, `JS Error: ${event.error?.message || 'Unknown'}`]);
+      const msg = event.error?.message || event.message || 'Unknown JS Error';
+      setErrorLog(prev => [...prev, `JS Error: ${msg}`]);
+      if (Capacitor.isNativePlatform()) {
+        Dialog.alert({
+          title: 'App Error Detected',
+          message: `Technical Details: ${msg}. Please report this to the developer.`
+        }).catch(() => {});
+      }
     };
     window.addEventListener('error', handleError);
     return () => window.removeEventListener('error', handleError);
@@ -3813,4 +3850,10 @@ const CallOverlay = ({ isOpen, onClose, isListening, lastMessage }: any) => {
     </motion.div>
   );
 }
-
+export default function SafeApp() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
