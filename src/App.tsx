@@ -420,6 +420,14 @@ function App() {
 
   // Firebase Authentication State Listener
   useEffect(() => {
+    // 4-Second Emergency Timeout to prevent Black Screen of Death
+    const emergencyTimer = setTimeout(() => {
+      if (authLoading) {
+        setAuthLoading(false);
+        logAction("Emergency Boot: Forcing authLoading to false");
+      }
+    }, 4000);
+
     const checkUser = async () => {
       try {
         const result = await FirebaseAuthentication.getCurrentUser();
@@ -471,21 +479,32 @@ function App() {
           }
         }
         
-        // Hide Splash Screen once initial check is done
-        if (Capacitor.isNativePlatform()) {
-          SplashScreen.hide().catch(() => {});
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to get current user/role', err);
-        if (Capacitor.isNativePlatform()) {
-          SplashScreen.hide().catch(() => {});
-        }
+        setErrorLog(prev => [...prev, `Boot Error: ${err.message}`]);
       } finally {
+        if (typeof emergencyTimer !== 'undefined') clearTimeout(emergencyTimer);
         setAuthLoading(false);
       }
     };
 
     checkUser();
+    
+    return () => {
+      if (typeof emergencyTimer !== 'undefined') clearTimeout(emergencyTimer);
+    };
+  }, []);
+
+  // Safe Splash Hiding
+  useEffect(() => {
+    if (!authLoading && Capacitor.isNativePlatform()) {
+      // Delay slightly to ensure React has rendered the child component (Auth or Main)
+      setTimeout(() => {
+        SplashScreen.hide().catch(() => {});
+      }, 300);
+    }
+  }, [authLoading]);
 
     const listener = FirebaseAuthentication.addListener('authStateChange', async (result) => {
       setUser(result.user);
@@ -1797,8 +1816,10 @@ function App() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-16 h-16 border-[6px] border-indigo-100 border-t-indigo-600 rounded-full animate-spin mb-6" />
+        <h2 className="text-xl font-black text-slate-900 mb-2">LexiQuest</h2>
+        <p className="text-slate-500 font-bold text-sm animate-pulse">Initializing smart dictionary...</p>
       </div>
     );
   }
