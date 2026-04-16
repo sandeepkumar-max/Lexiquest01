@@ -6,7 +6,7 @@ import { TextToSpeech } from '@capacitor-community/text-to-speech';
 import { AdMob } from '@capacitor-community/admob';
 import { App as CapApp } from '@capacitor/app';
 import { Dialog } from '@capacitor/dialog';
-import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info, Languages, Mic, Moon, Sun, BarChart3, Trophy } from 'lucide-react';
+import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info, Languages, Mic, Moon, Sun, BarChart3, Trophy, Phone, Bookmark, PhoneOff } from 'lucide-react';
 import { COMMON_WORDS } from './lib/dictionary';
 import { LEARN_WORDS } from './lib/learnWords';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
@@ -151,6 +151,9 @@ function App() {
   const [xp, setXp] = useState(() => parseInt(localStorage.getItem('xp') || '0'));
   const [level, setLevel] = useState(() => parseInt(localStorage.getItem('level') || '1'));
   const [showLevelUp, setShowLevelUp] = useState(false);
+  const [currentDailyIndex, setCurrentDailyIndex] = useState(0);
+  const [dailyWordsLearned, setDailyWordsLearned] = useState(() => parseInt(localStorage.getItem('dailyWordsLearned') || '0'));
+  const [lastDailyWordDate, setLastDailyWordDate] = useState(() => localStorage.getItem('lastDailyWordDate') || '');
   // Achievements (Safe Load)
   const [badges, setBadges] = useState(() => safeParseJSON('badges', [
     { id: 'streak-7', title: '7-Day Streak', icon: '🔥', earned: false },
@@ -1597,11 +1600,6 @@ function App() {
       setAlertMessage("Please sign in to save words!");
       return;
     }
-    if (!hasPremium) {
-      setSubscriptionModalOpen(true);
-      return;
-    }
-
     const isSaved = savedWords.some(sw => sw.word === w.word);
     try {
       if (isSaved) {
@@ -1609,14 +1607,52 @@ function App() {
         setSavedWords(prev => prev.filter(sw => sw.word !== w.word));
       } else {
         const data = { ...w, savedAt: Date.now() };
-        await FirebaseFirestore.addDocument({ reference: `users/${user.uid}/saved_words`, data });
-        // After add, we need to know the doc ID or just use word as ID
-        // Simplified: use word as document ID for easy toggling
         await FirebaseFirestore.setDocument({ reference: `users/${user.uid}/saved_words/${w.word}`, data });
         setSavedWords(prev => [...prev, data]);
       }
-    } catch (e) {
-      console.error("Flashcard sync failed:", e);
+    } catch (e: any) {
+      console.error("Toggle Save Error:", e);
+      setErrorLog(prev => [...prev, `Save Error: ${e.message}`]);
+    }
+  };
+
+  const handleTranslateDict = async () => {
+    logAction("Starting dictionary translation");
+    if (!hasPremium) {
+      setSubscriptionModalOpen(true);
+      return;
+    }
+    if (!dictResult || isTranslating) return;
+
+    setIsTranslating(true);
+    try {
+      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+      if (!apiKey) throw new Error("Missing Translation API Key");
+
+      const prompt = `Translate this dictionary entry to Hindi. Include the word, meaning, and example. 
+      Format: Word: Hindi Word, Meaning: Hindi Meaning, Example: Hindi Example.
+      Entry: ${dictResult.word} - ${dictResult.meanings[0].definitions[0].definition}`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama3-8b-8192',
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+
+      const data = await response.json();
+      const translation = data.choices?.[0]?.message?.content || "Translation failed.";
+      setDictHindi(translation);
+    } catch (err: any) {
+      console.error("Translation error:", err);
+      setDictHindi("Error performing translation: " + err.message);
+    } finally {
+      setIsTranslating(false);
     }
   };
 
