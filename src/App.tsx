@@ -148,6 +148,8 @@ export default function App() {
   const [bulkInput, setBulkInput] = useState('');
   const [newWordData, setNewWordData] = useState({ word: '', meaning: '', example: '', category: 'All' });
 
+  const hasPremium = isPremium || user?.email === MASTER_ADMIN_EMAIL;
+
   // Learn State
   const [learnPage, setLearnPage] = useState(0);
   const wordsPerPage = 30;
@@ -1383,17 +1385,8 @@ export default function App() {
         const audio = new Audio(audioUrl.startsWith('//') ? 'https:' + audioUrl : audioUrl);
         setDictAudio(audio);
       } else {
-        setDictAudio(null);
-      }
-    } catch {
-      setDictError('Network error. Please check your internet connection.');
-    } finally {
-      setDictLoading(false);
-    }
-  };
-
   const handleTranslateDict = async () => {
-    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+    if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
     }
@@ -1430,10 +1423,6 @@ export default function App() {
       setIsTranslating(false);
     }
   };
-
-
-
-
 
   const handleSubscribe = async (packageType: 'monthly' | 'yearly') => {
     try {
@@ -1478,12 +1467,15 @@ export default function App() {
         console.error("Purchase error details:", error);
         setAlertMessage(`Purchase Error: ${error.message || 'Check Play Console Setup'}. Code: ${error.code}`);
       }
-    }  const toggleSaveWord = async (w: { word: string, meaning: string, example: string }) => {
+    }
+  };
+
+  const toggleSaveWord = async (w: { word: string, meaning: string, example: string }) => {
     if (!user) {
       setAlertMessage("Please sign in to save words!");
       return;
     }
-    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+    if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
     }
@@ -1504,7 +1496,6 @@ export default function App() {
     } catch (e) {
       console.error("Flashcard sync failed:", e);
     }
-  };
   };
 
   const startListening = async () => {
@@ -1565,7 +1556,7 @@ export default function App() {
   };
 
   const handleStartCall = async () => {
-    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+    if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
     }
@@ -1649,7 +1640,7 @@ export default function App() {
   };
 
   const handleAiSendMessage = async (suggestion?: string, fromCall = false) => {
-    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+    if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
     }
@@ -1718,7 +1709,7 @@ export default function App() {
           LexiQuest
         </h1>
         <div className="flex items-center gap-2">
-          {!isPremium && (
+          {!hasPremium && (
             <button
               onClick={() => setSubscriptionModalOpen(true)}
               className="flex items-center gap-1 text-[10px] font-black text-amber-600 bg-amber-50 px-2.5 py-1.5 rounded-full border border-amber-200 uppercase tracking-tighter"
@@ -1768,7 +1759,7 @@ export default function App() {
         </button>
         <button
           onClick={() => {
-            if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+            if (!hasPremium) {
               setSubscriptionModalOpen(true);
               return;
             }
@@ -1778,7 +1769,7 @@ export default function App() {
         >
           <Bot className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Lexi</span>
-          {(!isPremium && user?.email !== MASTER_ADMIN_EMAIL) && (
+          {!hasPremium && (
             <Sparkles className="w-2.5 h-2.5 text-amber-500 absolute top-2 right-1/2 translate-x-4 fill-amber-500" />
           )}
         </button>
@@ -1791,7 +1782,7 @@ export default function App() {
         >
           <BookOpen className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Dict</span>
-          {!isPremium && (
+          {!hasPremium && (
             <Lock className="w-2.5 h-2.5 absolute top-2 right-1/2 translate-x-4 text-indigo-300" />
           )}
         </button>
@@ -1823,7 +1814,7 @@ export default function App() {
                   <p className="text-gray-600">
                     Expand your vocabulary with these commonly misspelled words and your custom dictionary.
                   </p>
-                  {!isPremium && (
+                  {!hasPremium && (
                     <button
                       onClick={() => setSubscriptionModalOpen(true)}
                       className="mt-4 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
@@ -1851,24 +1842,24 @@ export default function App() {
               {/* Search Box */}
               <div className="mb-8 relative group">
                 <div className="relative">
-                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${isPremium || user?.email === MASTER_ADMIN_EMAIL ? 'text-gray-400' : 'text-indigo-300'}`} />
+                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${hasPremium ? 'text-gray-400' : 'text-indigo-300'}`} />
                   <input
                     type="text"
                     value={learnSearchQuery}
                     onChange={(e) => setLearnSearchQuery(e.target.value)}
-                    placeholder={isPremium || user?.email === MASTER_ADMIN_EMAIL ? "Search words or meanings..." : "Unlock Search with Premium"}
-                    readOnly={!isPremium && user?.email !== MASTER_ADMIN_EMAIL}
-                    className={`w-full pl-12 pr-4 py-4 bg-white border rounded-2xl shadow-sm outline-none transition-all ${isPremium || user?.email === MASTER_ADMIN_EMAIL
+                    placeholder={hasPremium ? "Search words or meanings..." : "Unlock Search with Premium"}
+                    readOnly={!hasPremium}
+                    className={`w-full pl-12 pr-4 py-4 bg-white border rounded-2xl shadow-sm outline-none transition-all ${hasPremium
                       ? 'border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10'
                       : 'border-indigo-100 bg-indigo-50/30 cursor-pointer placeholder-indigo-300'
                       }`}
                     onClick={() => {
-                      if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+                      if (!hasPremium) {
                         setSubscriptionModalOpen(true);
                       }
                     }}
                   />
-                  {!isPremium && user?.email !== MASTER_ADMIN_EMAIL && (
+                  {!hasPremium && (
                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
                       <Lock className="w-5 h-5 text-indigo-400" />
                     </div>
@@ -1889,7 +1880,7 @@ export default function App() {
                     <button
                       key={cat}
                       onClick={() => {
-                        if (isPremium || user?.email === MASTER_ADMIN_EMAIL) {
+                        if (hasPremium || cat === 'All') {
                           setSelectedCategory(cat);
                           setLearnPage(0);
                         } else {
@@ -1901,12 +1892,12 @@ export default function App() {
                         : 'bg-white text-gray-500 border border-gray-100 hover:border-indigo-200'
                         }`}
                     >
-                      {(!isPremium && user?.email !== MASTER_ADMIN_EMAIL && cat !== 'All') && <Lock className="w-3 h-3" />}
+                      {(!hasPremium && cat !== 'All') && <Lock className="w-3 h-3" />}
                       {cat}
                     </button>
                   ))}
                 </div>
-                {!isPremium && user?.email !== MASTER_ADMIN_EMAIL && (
+                {!hasPremium && (
                   <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
                     ✨ Subscribe once to unlock search forever
                   </p>
@@ -2056,20 +2047,20 @@ export default function App() {
                     {/* Premium Locked Test Mode */}
                     <button
                       onClick={() => {
-                        if (isPremium || user?.email === MASTER_ADMIN_EMAIL) {
+                        if (hasPremium) {
                           startTest('meaning-mcq');
                         } else {
                           setSubscriptionModalOpen(true);
                         }
                       }}
-                      className={`px-6 py-4 border-2 font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 relative ${isPremium || user?.email === MASTER_ADMIN_EMAIL
+                      className={`px-6 py-4 border-2 font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 relative ${hasPremium
                         ? 'bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700'
                         : 'bg-white border-indigo-100 text-indigo-400 hover:border-indigo-200'
                         }`}
                     >
                       <GraduationCap className="w-6 h-6" />
                       Meaning & Context
-                      {!isPremium && user?.email !== MASTER_ADMIN_EMAIL && (
+                      {!hasPremium && (
                         <Lock className="w-4 h-4 absolute top-2 right-2 text-indigo-300" />
                       )}
                     </button>
@@ -2372,8 +2363,8 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-3">
                         <p className="text-slate-500 font-bold text-xs flex items-center gap-2">
-                          <Star className={`w-3.5 h-3.5 ${isPremium || user?.email === MASTER_ADMIN_EMAIL ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
-                          {user?.email === MASTER_ADMIN_EMAIL ? 'Master Admin' : (isPremium ? 'Premium Member' : 'Free Explorer')}
+                          <Star className={`w-3.5 h-3.5 ${hasPremium ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
+                          {user?.email === MASTER_ADMIN_EMAIL ? 'Master Admin' : (hasPremium ? 'Premium Member' : 'Free Explorer')}
                         </p>
                         <button
                           onClick={async () => {
@@ -2507,7 +2498,7 @@ export default function App() {
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-black">{streakShields} Available</p>
-                  {!isPremium ? (
+                  {!hasPremium ? (
                     <button
                       onClick={() => setSubscriptionModalOpen(true)}
                       className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full uppercase hover:bg-white/30 transition-colors"
