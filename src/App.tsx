@@ -14,6 +14,7 @@ import { FirebaseFirestore } from '@capacitor-firebase/firestore';
 import Auth from './components/Auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { Purchases, LOG_LEVEL, PACKAGE_TYPE } from '@revenuecat/purchases-capacitor';
+import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 
 type Tab = 'learn' | 'test' | 'dictionary' | 'ai-coach' | 'profile';
 
@@ -47,6 +48,7 @@ export default function App() {
   const [aiChat, setAiChat] = useState<{ role: 'user' | 'model', content: string }[]>([]);
   const [aiInput, setAiInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isOnCall, setIsOnCall] = useState(false);
   const aiChatEndRef = useRef<HTMLDivElement>(null);
 
   // Saved Words State
@@ -1504,23 +1506,122 @@ export default function App() {
   };
   };
 
-  const startListening = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setAlertMessage("Voice search is not supported on this browser/device.");
+  const startListening = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const available = await SpeechRecognition.available();
+        if (!available.available) {
+          setAlertMessage("Speech recognition is not available on this device.");
+          return;
+        }
+
+        const permission = await SpeechRecognition.requestPermissions();
+        if (permission.speechRecognition !== 'granted') {
+          setAlertMessage("Microphone permission required for voice input.");
+          return;
+        }
+
+        setIsListening(true);
+        SpeechRecognition.start({
+          language: "en-US",
+          partialResults: true,
+          popup: false,
+        });
+
+        SpeechRecognition.addListener('partialResults', (data: any) => {
+          if (data.matches && data.matches.length > 0) {
+            setAiInput(data.matches[0]);
+          }
+        });
+
+        // Use a timer to stop instead of just onEnd to avoid getting stuck
+        setTimeout(async () => {
+          await SpeechRecognition.stop();
+          setIsListening(false);
+          SpeechRecognition.removeAllListeners();
+        }, 5000);
+
+      } catch (err) {
+        console.error("Speech recognition error:", err);
+        setIsListening(false);
+      }
+    } else {
+      // Browser fallback
+      const SpeechRecognitionWeb = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognitionWeb) {
+        setAlertMessage("Voice search is not supported on this browser.");
+        return;
+      }
+      const recognition = new SpeechRecognitionWeb();
+      recognition.lang = 'en-US';
+      recognition.onstart = () => setIsListening(true);
+      recognition.onresult = (event: any) => {
+        setAiInput(event.results[0][0].transcript);
+      };
+      recognition.onend = () => setIsListening(false);
+      recognition.start();
+    }
+  };
+
+  const handleStartCall = async () => {
+    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+      setSubscriptionModalOpen(true);
       return;
     }
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: any) => {
-      const text = event.results[0][0].transcript;
-      setAiInput(text);
+    
+    // Safety check for permissions
+    if (Capacitor.isNativePlatform()) {
+      const permission = await SpeechRecognition.requestPermissions();
+      if (permission.speechRecognition !== 'granted') {
+        setAlertMessage("Please grant microphone permission to start a call with Lexi.");
+        return;
+      }
+    }
+
+    setIsOnCall(true);
+    const greeting = "Hello friend! I'm Lexi. I'm listening, tell me anything or ask a question!";
+    setAiChat(prev => [...prev, { role: 'model', content: greeting }]);
+    playWord(greeting);
+    
+    // Begin listening loop after a short delay for the greeting
+    setTimeout(() => {
+      startListeningForCall();
+    }, 4500);
+  };
+
+  const startListeningForCall = async () => {
+    if (!Capacitor.isNativePlatform()) return;
+    
+    setIsListening(true);
+    try {
+      await SpeechRecognition.start({
+        language: "en-US",
+        partialResults: false,
+        popup: false,
+      });
+
+      SpeechRecognition.addListener('listeningState', (state: any) => {
+        if (state.status === 'stopped') {
+           setIsListening(false);
+        }
+      });
+
+      // The listener for result will trigger the AI response
+      const listener = await (SpeechRecognition as any).addListener('partialResults', async (data: any) => {
+        if (data.matches && data.matches.length > 0) {
+          const text = data.matches[0];
+          await SpeechRecognition.stop();
+          setIsListening(false);
+          SpeechRecognition.removeAllListeners();
+          
+          // Send to AI
+          handleAiSendMessage(text, true); 
+        }
+      });
+    } catch (e) {
+      console.error("Call listening error:", e);
       setIsListening(false);
-    };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
-    recognition.start();
+    }
   };
 
   const handleRestore = async () => {
@@ -1546,14 +1647,14 @@ export default function App() {
     }
   };
 
-  const handleAiSendMessage = async (suggestion?: string) => {
+  const handleAiSendMessage = async (suggestion?: string, fromCall = false) => {
     if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
       setSubscriptionModalOpen(true);
       return;
     }
     const text = suggestion || aiInput;
     if (!text.trim() || isAiLoading) return;
-
+    
     const newMessages = [...aiChat, { role: 'user' as const, content: text }];
     setAiChat(newMessages);
     setAiInput('');
@@ -1561,58 +1662,34 @@ export default function App() {
 
     try {
       const apiKey = import.meta.env.VITE_GROQ_API_KEY;
-      if (!apiKey) {
-        throw new Error('AI API Key not configured. Please add VITE_GROQ_API_KEY to your .env file.');
-      }
-
-      // Format chat history for Groq/OpenAI format
-      const chatHistory = aiChat.slice(-6).map(m => ({
-        role: m.role === 'model' ? 'assistant' : 'user',
-        content: m.content
-      }));
-
-      const systemInstructionContent = `You are 'Lexi', a close friend and a warm English Coach. 
-RULES for Lexi:
-1. Talk like a real friend, very warm and natural. Use casual, friendly language.
-2. Mix a little Hindi/Hinglish in your responses (e.g., "Bilkul sahi!", "Kya baat hai!"). 
-3. Keep responses VERY SHORT and concise (max 2-3 sentences). No long paragraphs.
-4. If the user makes a mistake, gently correct them but keep the vibe chill.
-5. End with a short, friendly question.
-6. Use emojis (😊, ✨, 👍) but don't overdo it.
-7. Understand Hindi/Hinglish queries perfectly.
-8. NEVER use markdown symbols like stars (**) or hashtags. Use plain text only.`;
+      if (!apiKey) throw new Error('API Key missing');
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           messages: [
-            { role: 'system', content: systemInstructionContent },
-            ...chatHistory,
+            { role: 'system', content: "You are 'Lexi', a warm friend. Keep reply VERY SHORT (1-2 sentences). Use a little Hinglish. End with a question." },
+            ...aiChat.slice(-4).map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.content })),
             { role: 'user', content: text }
-          ],
-          max_tokens: 800,
-          temperature: 0.7,
+          ]
         })
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Groq API Error:', errorData);
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
-      }
-
       const data = await response.json();
-      const botResponse = data.choices?.[0]?.message?.content || "I'm sorry, I couldn't process that. Please try again.";
-
+      const botResponse = data.choices?.[0]?.message?.content || "Sorry, I missed that.";
       setAiChat(prev => [...prev, { role: 'model', content: botResponse }]);
-    } catch (err: any) {
-      console.error('AI Coach Error:', err);
-      setAiChat(prev => [...prev, { role: 'model', content: `Error: ${err.message || 'Failed to connect to AI'}` }]);
+      
+      if (fromCall && isOnCall) {
+        playWord(botResponse);
+        // Wait for Lexi to finish talking before listening again
+        setTimeout(() => {
+          if (isOnCall) startListeningForCall();
+        }, 5000);
+      }
+    } catch (err) {
+      console.error(err);
     } finally {
       setIsAiLoading(false);
       setTimeout(() => aiChatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -2951,10 +3028,18 @@ RULES for Lexi:
                   />
                   <button
                     type="button"
-                    onClick={startListening}
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${isListening ? 'bg-red-500 animate-pulse text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                    onClick={handleStartCall}
+                    className="p-3 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+                    title="Call Lexi"
                   >
-                    <Mic className="w-4 h-4" />
+                    <Phone className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startListening}
+                    className={`p-3 rounded-xl transition-all ${isListening ? 'bg-rose-100 text-rose-600 animate-pulse' : 'text-slate-400 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                  >
+                    <Mic className="w-5 h-5" />
                   </button>
                   <button
                     type="submit"
@@ -3449,7 +3534,6 @@ RULES for Lexi:
           )}
         </AnimatePresence>
 
-        {/* Admin Minimal Add Word Modal */}
         {adminAddModalOpen && (
           <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-6 backdrop-blur-sm">
             <div className="bg-white rounded-[2rem] w-full max-w-md p-8 shadow-2xl animate-in fade-in zoom-in duration-300">
@@ -3531,8 +3615,100 @@ RULES for Lexi:
           </div>
         )}
 
+        <AnimatePresence>
+          {isOnCall && (
+            <CallOverlay 
+              isOpen={isOnCall} 
+              onClose={() => {
+                setIsOnCall(false);
+                SpeechRecognition.stop();
+                SpeechRecognition.removeAllListeners();
+                setIsListening(false);
+              }}
+              isListening={isListening}
+              lastMessage={aiChat.filter(m => m.role === 'model').slice(-1)[0]?.content}
+            />
+          )}
+        </AnimatePresence>
+
       </main>
     </div>
+  );
+}
+
+const CallOverlay = ({ isOpen, onClose, isListening, lastMessage }: any) => {
+  if (!isOpen) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] bg-slate-950 flex flex-col items-center justify-center p-8 backdrop-blur-xl bg-opacity-95"
+    >
+      <div className="absolute top-10 left-0 right-0 text-center">
+        <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.5em] mb-2">Voice Call</p>
+        <h2 className="text-2xl font-black text-white">Lexi AI</h2>
+      </div>
+
+      <div className="relative mb-12">
+        {/* Animated Orbs */}
+        <motion.div
+          animate={{ scale: isListening ? [1, 1.2, 1] : 1 }}
+          transition={{ repeat: Infinity, duration: 2 }}
+          className="w-48 h-48 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center shadow-[0_0_80px_rgba(79,70,229,0.4)]"
+        >
+          <div className="w-40 h-40 bg-slate-900/40 rounded-full backdrop-blur-md flex items-center justify-center">
+            <motion.div
+               animate={{ rotate: isListening ? 360 : 0 }}
+               transition={{ repeat: Infinity, duration: 8, ease: "linear" }}
+            >
+              <Bot className="w-20 h-20 text-white" />
+            </motion.div>
+          </div>
+        </motion.div>
+        
+        {isListening && (
+           <motion.div 
+             initial={{ scale: 0.8, opacity: 0 }}
+             animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+             transition={{ repeat: Infinity, duration: 1.5 }}
+             className="absolute inset-0 border-4 border-indigo-400 rounded-full"
+           />
+        )}
+      </div>
+
+      <div className="text-center max-w-xs mb-20 min-h-[80px]">
+        {isListening ? (
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex gap-1">
+              {[1, 2, 3].map(i => (
+                <motion.div
+                  key={i}
+                  animate={{ height: [8, 20, 8] }}
+                  transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.1 }}
+                  className="w-1.5 bg-indigo-400 rounded-full"
+                />
+              ))}
+            </div>
+            <p className="text-indigo-300 font-bold text-sm tracking-widest uppercase">Listening...</p>
+          </div>
+        ) : (
+          <p className="text-white/80 font-medium text-lg italic leading-relaxed">
+            {lastMessage || "Lexi is thinking..."}
+          </p>
+        )}
+      </div>
+
+      <button
+        onClick={onClose}
+        className="w-20 h-20 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-rose-900/20 active:scale-95 transition-transform"
+      >
+        <div className="rotate-[135deg]">
+          <Phone className="w-8 h-8 fill-white" />
+        </div>
+      </button>
+    </motion.div>
   );
 }
 
