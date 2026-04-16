@@ -112,6 +112,14 @@ function App() {
   const isPluginsInitialized = useRef(false);
   const [adReady, setAdReady] = useState(false);
   const [errorLog, setErrorLog] = useState<string[]>([]);
+  const [lastAction, setLastAction] = useState<string>('App started');
+
+  const logAction = (msg: string) => {
+    console.log(`[TRACE] ${msg}`);
+    const time = new Date().toLocaleTimeString();
+    setLastAction(`${time}: ${msg}`);
+    setErrorLog(prev => [`${time}: ${msg}`, ...prev].slice(0, 50));
+  };
 
   // Test State
   const [testState, setTestState] = useState<'start' | 'testing' | 'results'>('start');
@@ -1480,6 +1488,7 @@ function App() {
   };
 
   const handleTranslateDict = async () => {
+    logAction("Starting dictionary translation");
     if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
@@ -1565,6 +1574,7 @@ function App() {
   };
 
   const toggleSaveWord = async (w: { word: string, meaning: string, example: string }) => {
+    logAction(`Toggling save for: ${w.word}`);
     if (!user) {
       setAlertMessage("Please sign in to save words!");
       return;
@@ -1650,6 +1660,7 @@ function App() {
   };
 
   const handleStartCall = async () => {
+    logAction("Starting AI Call Overlay");
     if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
@@ -1734,6 +1745,8 @@ function App() {
   };
 
   const handleAiSendMessage = async (suggestion?: string, fromCall = false) => {
+    const txt = suggestion || aiInput;
+    logAction(`Sending AI Message: ${txt.slice(0, 20)}...`);
     if (!hasPremium) {
       setSubscriptionModalOpen(true);
       return;
@@ -1805,14 +1818,20 @@ function App() {
         <div className="flex items-center gap-2">
           {!hasPremium && (
             <button
-              onClick={() => setSubscriptionModalOpen(true)}
+              onClick={() => {
+                logAction("Opening Subscription Modal");
+                setSubscriptionModalOpen(true);
+              }}
               className="flex items-center gap-1 text-[10px] font-black text-amber-600 bg-amber-50 px-2.5 py-1.5 rounded-full border border-amber-200 uppercase tracking-tighter"
             >
               <Star className="w-3 h-3 fill-amber-500" /> PRO
             </button>
           )}
           <button
-            onClick={() => setActiveTab('profile')}
+            onClick={() => {
+              logAction("Navigating to Profile");
+              setActiveTab('profile');
+            }}
             className={`w-8 h-8 rounded-full flex items-center justify-center border transition-colors ${activeTab === 'profile' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}
           >
             <UserPlus className="w-4 h-4" />
@@ -2562,12 +2581,22 @@ function App() {
                   </div>
                   <p className="text-xs text-amber-800 font-medium leading-relaxed">
                     Ads are disabled for <b>{user.email}</b> to ensure a smooth administrative experience. 
-                    Testing ads is recommended on a regular explorer account.
                   </p>
+                  
+                  <div className="mt-4 p-3 bg-white/40 rounded-xl border border-amber-200/50">
+                     <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1">Current State Diagnostic</p>
+                     <div className="grid grid-cols-2 gap-2 text-[9px] font-medium text-amber-900">
+                        <div>User ID: {user?.uid?.slice(0,8)}...</div>
+                        <div>Premium: {isPremium ? 'YES' : 'NO'}</div>
+                        <div>Ads Init: {adInitialized ? 'YES' : 'NO'}</div>
+                        <div>Ad Ready: {adReady ? 'YES' : 'NO'}</div>
+                        <div className="col-span-2 text-indigo-700">Last Action: {lastAction}</div>
+                     </div>
+                  </div>
                   
                   {errorLog.length > 0 && (
                     <div className="mt-4 pt-4 border-t border-amber-200">
-                      <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-2">Internal Debug Log</p>
+                      <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-2">Interactions / Error Log</p>
                       <div className="bg-white/50 rounded-xl p-3 font-mono text-[10px] text-amber-900 max-h-32 overflow-y-auto">
                         {errorLog.map((log, i) => <div key={i} className="mb-1 border-b border-amber-100 pb-1 last:border-none">{log}</div>)}
                       </div>
