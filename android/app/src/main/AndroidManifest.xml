@@ -4,8 +4,18 @@
         <intent>
             <action android:name="com.google.android.gms.ads.IDENTIFIER" />
         </intent>
+        <intent>
+            <action android:name="com.android.vending.billing.InAppBillingService.BIND" />
+        </intent>
+        <!-- Package visibility for Google Play Services -->
         <package android:name="com.google.android.gms" />
         <package android:name="com.android.vending" />
+        <!-- AdMob / Play Services Browser filtering -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
     </queries>
 
     <application

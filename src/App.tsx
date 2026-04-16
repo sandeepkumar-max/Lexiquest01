@@ -6,7 +6,7 @@ import { TextToSpeech } from '@capacitor-community/text-to-speech';
 import { AdMob } from '@capacitor-community/admob';
 import { App as CapApp } from '@capacitor/app';
 import { Dialog } from '@capacitor/dialog';
-import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info } from 'lucide-react';
+import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info, Languages, Mic, Moon, Sun, BarChart3, Trophy } from 'lucide-react';
 import { COMMON_WORDS } from './lib/dictionary';
 import { LEARN_WORDS } from './lib/learnWords';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
@@ -49,12 +49,20 @@ export default function App() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const aiChatEndRef = useRef<HTMLDivElement>(null);
 
+  // Saved Words State
+  const [savedWords, setSavedWords] = useState<{ word: string, meaning: string, example: string, savedAt: number }[]>([]);
+
   // AdMob State
   const [adInitialized, setAdInitialized] = useState(false);
-  const [isPremium, setIsPremium] = useState(() => localStorage.getItem('isPremium') === 'true');
+  const [isPremium, setIsPremium] = useState(() => {
+    // Immediate Admin Check
+    const localEmail = localStorage.getItem('userEmail');
+    if (localEmail === MASTER_ADMIN_EMAIL) return true;
+    return localStorage.getItem('isPremium') === 'true';
+  });
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
-  const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-3271133689051975/5794528015';
+  const ADMOB_INTERSTITIAL_ID = import.meta.env.VITE_ADMOB_INTERSTITIAL_ID || 'ca-app-pub-3271133689051975/5794528015';
 
   // Test State
   const [testState, setTestState] = useState<'start' | 'testing' | 'results'>('start');
@@ -65,7 +73,13 @@ export default function App() {
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
   const [mcqOptions, setMcqOptions] = useState<string[][]>([]);
   const [typedAnswer, setTypedAnswer] = useState('');
-  const [feedbackState, setFeedbackState] = useState<'none' | 'correct' | 'incorrect'>('none');
+  const [feedbackState, setFeedbackState] = useState<'none' | 'correct' | 'incorrect' | 'timeout'>('none');
+  const [timeLeft, setTimeLeft] = useState(15);
+  const timerRef = useRef<any>(null);
+
+  // Sound effects
+  const correctSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3'), []);
+  const wrongSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2015/2015-preview.mp3'), []);
 
   // Streak State
   const [streak, setStreak] = useState(() => parseInt(localStorage.getItem('streak') || '0'));
@@ -127,6 +141,8 @@ export default function App() {
   const [deleteInput, setDeleteInput] = useState('');
   const [dailyWordsModalOpen, setDailyWordsModalOpen] = useState(false);
   const [adminAddModalOpen, setAdminAddModalOpen] = useState(false);
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [bulkInput, setBulkInput] = useState('');
   const [newWordData, setNewWordData] = useState({ word: '', meaning: '', example: '', category: 'All' });
 
   // Learn State
@@ -210,14 +226,13 @@ export default function App() {
         if (Capacitor.isNativePlatform()) {
           try {
             await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
-            await Purchases.configure({ apiKey: 'goog_LysRWtNTBrBgDYdwvHhTHOjGEdq' });
+            await Purchases.configure({ apiKey: import.meta.env.VITE_REVENUECAT_API_KEY });
 
             // Check status on start
             const info = await Purchases.getCustomerInfo();
             const customerInfo = (info as any).customerInfo || info;
-            console.log("RevenueCat Customer Info:", customerInfo);
-
-            if (customerInfo?.entitlements?.active['premium']) {
+            
+            if (user.email === MASTER_ADMIN_EMAIL || customerInfo?.entitlements?.active['premium']) {
               setIsPremium(true);
               localStorage.setItem('isPremium', 'true');
             }
@@ -231,7 +246,21 @@ export default function App() {
       if (user.email === MASTER_ADMIN_EMAIL) {
         setIsPremium(true);
         localStorage.setItem('isPremium', 'true');
+        localStorage.setItem('userEmail', user.email);
       }
+      
+      // Fetch Saved Words for user
+      const fetchSavedWords = async () => {
+        try {
+          const { snapshots } = await FirebaseFirestore.getCollection({ reference: `users/${user.uid}/saved_words` });
+          if (snapshots) {
+            setSavedWords(snapshots.map(s => s.data as any));
+          }
+        } catch (e) {
+          console.error("Failed to fetch saved words:", e);
+        }
+      };
+      fetchSavedWords();
     }
   }, [user]);
   const [reminderEnabled, setReminderEnabled] = useState(() => localStorage.getItem('reminderEnabled') === 'true');
@@ -255,7 +284,9 @@ export default function App() {
 
   // Initialize AdMob and setup periodic interstitial
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || !user || isPremium) {
+    // ADMIN BYPASS: No ads for admin or premium users
+    const isMasterAdmin = user?.email === MASTER_ADMIN_EMAIL;
+    if (!Capacitor.isNativePlatform() || !user || isPremium || isMasterAdmin) {
       return;
     }
 
@@ -271,6 +302,7 @@ export default function App() {
 
         // Setup 120 second interval (2 minutes)
         adInterval = setInterval(async () => {
+          if (!user || isPremium) return; // Double protection
           try {
             await AdMob.showInterstitial();
             // Prepare next ad immediately after show
@@ -291,7 +323,7 @@ export default function App() {
     return () => {
       if (adInterval) clearInterval(adInterval);
     };
-  }, [isPremium]);
+  }, [user, isPremium]);
 
   // AdMob and setup periodic interstitial
 
@@ -333,7 +365,8 @@ export default function App() {
           }
 
           // AUTHENTICATION LOGIC: Purely based on Firestore premium field
-          if (isPremiumUser) {
+          // ADMIN OVERRIDE: Prioritize master admin email
+          if (result.user.email === MASTER_ADMIN_EMAIL || isPremiumUser) {
             setIsPremium(true);
             localStorage.setItem('isPremium', 'true');
           } else {
@@ -342,7 +375,8 @@ export default function App() {
           }
 
           // Enforce email verification for non-admins using email
-          if (result.user.email && !result.user.emailVerified) {
+          const isMasterAdmin = result.user.email === MASTER_ADMIN_EMAIL;
+          if (result.user.email && !result.user.emailVerified && !isMasterAdmin) {
             setUser(null);
           }
         }
@@ -389,6 +423,50 @@ export default function App() {
   }, []);
 
   const handleAdminAddWord = async () => {
+    if (isBulkMode) {
+      if (!bulkInput.trim()) return;
+      setIsAiLoading(true);
+      try {
+        const lines = bulkInput.split('\n').filter(line => line.trim());
+        let successCount = 0;
+
+        for (const line of lines) {
+          // Format expected: Word: Meaning: Example
+          // Or just Word: Meaning
+          const parts = line.split(':').map(p => p.trim());
+          if (parts.length < 2) continue;
+
+          const word = parts[0].toLowerCase();
+          const meaning = parts[1];
+          const example = parts[2] || 'Example context not provided.';
+
+          await FirebaseFirestore.setDocument({
+            reference: 'shared_words/' + word,
+            data: {
+              word,
+              meaning,
+              example,
+              category: newWordData.category,
+              createdAt: Date.now()
+            }
+          });
+          successCount++;
+        }
+
+        setAlertMessage(`Successfully added ${successCount} words! 🚀`);
+        setAdminAddModalOpen(false);
+        setBulkInput('');
+        setIsBulkMode(false);
+        localStorage.removeItem('cached_shared_words_ts');
+        fetchAiWords(true);
+      } catch (err) {
+        setAlertMessage("Bulk upload failed partially.");
+      } finally {
+        setIsAiLoading(false);
+      }
+      return;
+    }
+
     if (!newWordData.word || !newWordData.meaning) return;
     setIsAiLoading(true);
     try {
@@ -398,7 +476,8 @@ export default function App() {
           word: newWordData.word.toLowerCase(),
           meaning: newWordData.meaning,
           example: newWordData.example || 'Example context not provided.',
-          category: newWordData.category
+          category: newWordData.category,
+          createdAt: Date.now()
         }
       });
       setAlertMessage("Word added to Global Dictionary! ✨");
@@ -407,7 +486,7 @@ export default function App() {
       // Clear cache to force re-fetch
       localStorage.removeItem('cached_shared_words_ts');
       localStorage.removeItem('cached_ai_words_ts');
-      fetchAiWords(true); 
+      fetchAiWords(true);
     } catch (err) {
       setAlertMessage("Failed to add word.");
     } finally {
@@ -417,7 +496,7 @@ export default function App() {
 
   const fetchLeaderboard = async () => {
     try {
-      const { snapshots } = await FirebaseFirestore.getCollection({ 
+      const { snapshots } = await FirebaseFirestore.getCollection({
         reference: 'users',
         // In a real app we would use compound queries, but for now we'll fetch and sort top users
       });
@@ -603,7 +682,7 @@ export default function App() {
 
       // Track daily progress
       const currentHistory = [...xpHistory];
-      currentHistory[6] += amount; 
+      currentHistory[6] += amount;
       setXpHistory(currentHistory);
       localStorage.setItem('xpHistory', JSON.stringify(currentHistory));
 
@@ -753,10 +832,6 @@ export default function App() {
   }, [customWords]);
 
   useEffect(() => {
-    localStorage.setItem('adminPin', adminPin);
-  }, [adminPin]);
-
-  useEffect(() => {
     localStorage.setItem('reminderTime', reminderTime);
     localStorage.setItem('reminderEnabled', String(reminderEnabled));
   }, [reminderTime, reminderEnabled]);
@@ -766,36 +841,54 @@ export default function App() {
       if (!Capacitor.isNativePlatform()) return;
 
       try {
-        // Cancel existing notification with id 1 before rescheduling
-        await LocalNotifications.cancel({ notifications: [{ id: 1 }] });
+        // Create Notification Channel for Android
+        await LocalNotifications.createChannel({
+          id: 'lexiquest-reminders',
+          name: 'LexiQuest Reminders',
+          description: 'Daily practice and streak reminders',
+          importance: 5,
+          visibility: 1,
+          vibrate: true
+        });
 
+        // Cancel existing notifications
+        await LocalNotifications.cancel({ notifications: [{ id: 1 }, { id: 100 }, { id: 101 }] });
+
+        const notifications: any[] = [];
+
+        // 1. User Custom Reminder
         if (reminderEnabled) {
           const [hours, minutes] = reminderTime.split(':').map(Number);
-
-          await LocalNotifications.schedule({
-            notifications: [
-              {
-                title: "LexiQuest Practice Time! 📚",
-                body: "Ready for your daily 5 words? Let's grow your vocabulary! ✨",
-                id: 1,
-                schedule: {
-                  on: {
-                    hour: hours,
-                    minute: minutes
-                  },
-                  repeats: true,
-                  allowWhileIdle: true
-                },
-                extra: {
-                  data: 'reminder'
-                }
-              }
-            ]
+          notifications.push({
+            title: "LexiQuest Time! 📚",
+            body: "Ready for your daily 5 words? Let's grow your vocabulary! ✨",
+            id: 1,
+            channelId: 'lexiquest-reminders',
+            schedule: { on: { hour: hours, minute: minutes }, repeats: true, allowWhileIdle: true }
           });
-          console.log(`Daily reminder scheduled for ${hours}:${minutes}`);
         }
+
+        // 2. Global Evening Reminder (7:30 PM)
+        notifications.push({
+          title: "Evening Brain Reset! 🧠",
+          body: "It's 7:30 PM! Take a quick 2-minute break to learn something new. ✨",
+          id: 100,
+          channelId: 'lexiquest-reminders',
+          schedule: { on: { hour: 19, minute: 30 }, repeats: true, allowWhileIdle: true }
+        });
+
+        // 3. Streak Protection Reminder (6:30 PM)
+        notifications.push({
+          title: "Streak at Risk! 🔥",
+          body: "Don't lose your progress! Practice now to keep your daily streak alive.",
+          id: 101,
+          channelId: 'lexiquest-reminders',
+          schedule: { on: { hour: 18, minute: 30 }, repeats: true, allowWhileIdle: true }
+        });
+
+        await LocalNotifications.schedule({ notifications });
       } catch (err) {
-        console.error('Failed to schedule reminder:', err);
+        console.error('Failed to schedule reminders:', err);
       }
     };
 
@@ -887,20 +980,23 @@ export default function App() {
       if (Capacitor.isNativePlatform()) {
         try {
           const result = await TextToSpeech.getSupportedVoices();
-          // Filter for better English voices (like Google UK/US)
-          const enVoices = (result.voices || []).filter(v => v.lang.startsWith('en'));
-          setAvailableVoices(enVoices);
+          // Filter for Indian English voices (en-IN)
+          const enInVoices = (result.voices || []).filter(v => v.lang.startsWith('en-IN'));
+          const otherEnVoices = (result.voices || []).filter(v => v.lang.startsWith('en-') && !v.lang.startsWith('en-IN'));
+          
+          // Combine prioritizing en-IN
+          const allEnVoices = [...enInVoices, ...otherEnVoices];
+          setAvailableVoices(allEnVoices);
 
           setSelectedVoiceURI(prev => {
             if (prev) return prev;
-            // Prefer Google voices as they sound more natural on Android
-            const defaultVoice =
-              enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('en-us-x-sfg-local')) ||
-              enVoices.find(v => v.lang.startsWith('en-US') && v.name.toLowerCase().includes('google') && v.name.toLowerCase().includes('female')) ||
-              enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('enhanced')) ||
-              enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('google')) ||
-              enVoices.find(v => v.lang.startsWith('en-')) ||
-              enVoices[0];
+            // Prefer Indian voices first
+            const defaultVoice = 
+              enInVoices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('aditi')) ||
+              enInVoices.find(v => v.name.toLowerCase().includes('male')) ||
+              enInVoices[0] ||
+              otherEnVoices.find(v => v.name.toLowerCase().includes('google')) ||
+              otherEnVoices[0];
             return defaultVoice ? defaultVoice.voiceURI : '';
           });
         } catch (err) {
@@ -912,15 +1008,18 @@ export default function App() {
         const voices = window.speechSynthesis.getVoices();
         if (voices.length === 0) return;
 
-        const enVoices = voices.filter(v => v.lang.startsWith('en'));
-        setAvailableVoices(enVoices);
+        const enInVoices = voices.filter(v => v.lang.startsWith('en-IN'));
+        const otherEnVoices = voices.filter(v => v.lang.startsWith('en-') && !v.lang.startsWith('en-IN'));
+        const allEnVoices = [...enInVoices, ...otherEnVoices];
+        setAvailableVoices(allEnVoices);
 
         setSelectedVoiceURI(prev => {
           if (prev) return prev;
-          const defaultVoice =
-            enVoices.find(v => v.lang.startsWith('en-') && v.name.toLowerCase().includes('female')) ||
-            enVoices.find(v => v.lang.startsWith('en-')) ||
-            enVoices[0];
+          const defaultVoice = 
+            enInVoices.find(v => v.name.includes('Google') || v.name.includes('India')) ||
+            enInVoices[0] ||
+            otherEnVoices.find(v => v.name.includes('Google')) ||
+            otherEnVoices[0];
           return defaultVoice ? defaultVoice.voiceURI : prev;
         });
       }
@@ -1132,6 +1231,30 @@ export default function App() {
     if (mode === 'listen-mcq' || mode === 'listen-type') {
       playWord(selected[0]);
     }
+    startTimer();
+  };
+
+  const startTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setTimeLeft(15);
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          handleTimeout();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const handleTimeout = () => {
+    if (feedbackState !== 'none') return;
+    wrongSound.play().catch(() => {});
+    setFeedbackState('timeout');
+    const newAnswers = [...userAnswers, '']; // Blank for timeout
+    setUserAnswers(newAnswers);
   };
 
   const playWord = async (word: string) => {
@@ -1175,12 +1298,14 @@ export default function App() {
   };
 
   const handleAnswerSubmit = (answer: string) => {
+    if (timerRef.current) clearInterval(timerRef.current);
     const newAnswers = [...userAnswers, answer.toLowerCase()];
     setUserAnswers(newAnswers);
 
     const isCorrect = answer.toLowerCase() === testWords[currentTestWordIndex].toLowerCase();
 
     if (isCorrect) {
+      correctSound.play().catch(() => {});
       setFeedbackState('correct');
       addXp(10); // Reward for correct answer
       updateMission('correct-10', 1);
@@ -1188,6 +1313,7 @@ export default function App() {
         handleNextQuestion(currentTestWordIndex);
       }, 1000);
     } else {
+      wrongSound.play().catch(() => {});
       setFeedbackState('incorrect');
     }
   };
@@ -1224,6 +1350,7 @@ export default function App() {
       if (testMode !== 'visual-mcq' && testMode !== 'meaning-mcq') {
         playWord(testWords[index + 1]);
       }
+      startTimer();
     } else {
       recordPractice();
       setTestState('results');
@@ -1263,7 +1390,7 @@ export default function App() {
   };
 
   const handleTranslateDict = async () => {
-    if (!isPremium) {
+    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
       setSubscriptionModalOpen(true);
       return;
     }
@@ -1308,27 +1435,29 @@ export default function App() {
   const handleSubscribe = async (packageType: 'monthly' | 'yearly') => {
     try {
       const offerings = await Purchases.getOfferings();
-      // Use the specific offering from your screenshot
-      const currentOffering = offerings.all['ofrng20a1dd3978'] || offerings.current;
-      
-      if (!currentOffering) {
-        setAlertMessage("Offerings not found. Please check RevenueCat dashboard.");
+      // Dynamically use 'current' offering, fallback to specific ID, finally fallback to first entry
+      const currentOffering = offerings.current || offerings.all['ofrng20a1dd3978'] || Object.values(offerings.all)[0];
+      console.log("RevenueCat Selected Offering:", currentOffering);
+
+      if (!currentOffering || !currentOffering.availablePackages || currentOffering.availablePackages.length === 0) {
+        setAlertMessage("Configuration Error: No active offerings found in RevenueCat. Please check your dashboard.");
         return;
       }
 
-      const pkg = currentOffering.availablePackages.find(p => 
+      const pkg = currentOffering.availablePackages.find(p =>
         (packageType === 'monthly' && p.packageType === PACKAGE_TYPE.MONTHLY) ||
         (packageType === 'yearly' && p.packageType === PACKAGE_TYPE.ANNUAL)
-      );
+      ) || currentOffering.availablePackages[0];
 
       if (pkg) {
         const { customerInfo } = await Purchases.purchasePackage({ aPackage: pkg });
+        console.log("Purchase Success Customer Info:", customerInfo);
         if (customerInfo.entitlements.active['premium']) {
           setIsPremium(true);
           localStorage.setItem('isPremium', 'true');
           setSubscriptionModalOpen(false);
           setAlertMessage("Welcome to Premium! 🎉");
-          
+
           // Sync with Firestore
           if (user?.uid) {
             await FirebaseFirestore.setDocument({
@@ -1339,14 +1468,40 @@ export default function App() {
           }
         }
       } else {
-        setAlertMessage("No active offerings found. Check RevenueCat Dashboard and Play Console Products.");
+        setAlertMessage("Configuration Error: No active packages found in this offering.");
       }
     } catch (error: any) {
       if (!error.userCancelled) {
         console.error("Purchase error details:", error);
-        setAlertMessage(`Purchase Error: ${error.message || 'Check Console Setup'}`);
+        setAlertMessage(`Purchase Error: ${error.message || 'Check Play Console Setup'}. Code: ${error.code}`);
       }
+    }  const toggleSaveWord = async (w: { word: string, meaning: string, example: string }) => {
+    if (!user) {
+      setAlertMessage("Please sign in to save words!");
+      return;
     }
+    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+      setSubscriptionModalOpen(true);
+      return;
+    }
+
+    const isSaved = savedWords.some(sw => sw.word === w.word);
+    try {
+      if (isSaved) {
+        await FirebaseFirestore.deleteDocument({ reference: `users/${user.uid}/saved_words/${w.word}` });
+        setSavedWords(prev => prev.filter(sw => sw.word !== w.word));
+      } else {
+        const data = { ...w, savedAt: Date.now() };
+        await FirebaseFirestore.addDocument({ reference: `users/${user.uid}/saved_words`, data });
+        // After add, we need to know the doc ID or just use word as ID
+        // Simplified: use word as document ID for easy toggling
+        await FirebaseFirestore.setDocument({ reference: `users/${user.uid}/saved_words/${w.word}`, data });
+        setSavedWords(prev => [...prev, data]);
+      }
+    } catch (e) {
+      console.error("Flashcard sync failed:", e);
+    }
+  };
   };
 
   const startListening = () => {
@@ -1392,6 +1547,10 @@ export default function App() {
   };
 
   const handleAiSendMessage = async (suggestion?: string) => {
+    if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
+      setSubscriptionModalOpen(true);
+      return;
+    }
     const text = suggestion || aiInput;
     if (!text.trim() || isAiLoading) return;
 
@@ -1531,7 +1690,7 @@ RULES for Lexi:
         </button>
         <button
           onClick={() => {
-            if (!isPremium) {
+            if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
               setSubscriptionModalOpen(true);
               return;
             }
@@ -1540,8 +1699,8 @@ RULES for Lexi:
           className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 relative transition-colors ${activeTab === 'ai-coach' ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}
         >
           <Bot className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Coach</span>
-          {!isPremium && (
+          <span className="text-[10px] font-bold uppercase tracking-wider">Lexi</span>
+          {(!isPremium && user?.email !== MASTER_ADMIN_EMAIL) && (
             <Sparkles className="w-2.5 h-2.5 text-amber-500 absolute top-2 right-1/2 translate-x-4 fill-amber-500" />
           )}
         </button>
@@ -1608,33 +1767,30 @@ RULES for Lexi:
                       <span className="text-sm font-semibold text-indigo-900">Tests: {totalTestsTaken}</span>
                     </div>
                   </div>
-                  <div className="text-sm text-gray-500 font-medium whitespace-nowrap self-end">
-                    Page {learnPage + 1} of {totalLearnPages}
-                  </div>
                 </div>
               </div>
 
               {/* Search Box */}
               <div className="mb-8 relative group">
                 <div className="relative">
-                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${isPremium ? 'text-gray-400' : 'text-indigo-300'}`} />
+                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${isPremium || user?.email === MASTER_ADMIN_EMAIL ? 'text-gray-400' : 'text-indigo-300'}`} />
                   <input
                     type="text"
                     value={learnSearchQuery}
                     onChange={(e) => setLearnSearchQuery(e.target.value)}
-                    placeholder={isPremium ? "Search words or meanings..." : "Unlock Search with Premium"}
-                    readOnly={!isPremium}
-                    className={`w-full pl-12 pr-4 py-4 bg-white border rounded-2xl shadow-sm outline-none transition-all ${isPremium || isAdminAuthenticated
+                    placeholder={isPremium || user?.email === MASTER_ADMIN_EMAIL ? "Search words or meanings..." : "Unlock Search with Premium"}
+                    readOnly={!isPremium && user?.email !== MASTER_ADMIN_EMAIL}
+                    className={`w-full pl-12 pr-4 py-4 bg-white border rounded-2xl shadow-sm outline-none transition-all ${isPremium || user?.email === MASTER_ADMIN_EMAIL
                       ? 'border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10'
                       : 'border-indigo-100 bg-indigo-50/30 cursor-pointer placeholder-indigo-300'
                       }`}
                     onClick={() => {
-                      if (!isPremium) {
+                      if (!isPremium && user?.email !== MASTER_ADMIN_EMAIL) {
                         setSubscriptionModalOpen(true);
                       }
                     }}
                   />
-                  {!isPremium && (
+                  {!isPremium && user?.email !== MASTER_ADMIN_EMAIL && (
                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
                       <Lock className="w-5 h-5 text-indigo-400" />
                     </div>
@@ -1655,7 +1811,7 @@ RULES for Lexi:
                     <button
                       key={cat}
                       onClick={() => {
-                        if (isPremium) {
+                        if (isPremium || user?.email === MASTER_ADMIN_EMAIL) {
                           setSelectedCategory(cat);
                           setLearnPage(0);
                         } else {
@@ -1667,12 +1823,12 @@ RULES for Lexi:
                         : 'bg-white text-gray-500 border border-gray-100 hover:border-indigo-200'
                         }`}
                     >
-                      {(!isPremium && cat !== 'All') && <Lock className="w-3 h-3" />}
+                      {(!isPremium && user?.email !== MASTER_ADMIN_EMAIL && cat !== 'All') && <Lock className="w-3 h-3" />}
                       {cat}
                     </button>
                   ))}
                 </div>
-                {!isPremium && (
+                {!isPremium && user?.email !== MASTER_ADMIN_EMAIL && (
                   <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
                     ✨ Subscribe once to unlock search forever
                   </p>
@@ -1702,16 +1858,25 @@ RULES for Lexi:
                     className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors cursor-pointer"
                     onClick={() => setExpandedWord(expandedWord === item.word ? null : item.word)}
                   >
-                    <div className="flex justify-between items-center w-full">
-                      <span className="font-medium text-lg">{item.word}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); playWord(item.word); }}
-                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                        title="Listen to pronunciation"
-                      >
-                        <Volume2 className="w-5 h-5" />
-                      </button>
-                    </div>
+                     <div className="flex justify-between items-center w-full">
+                       <span className="font-medium text-lg">{item.word}</span>
+                       <div className="flex items-center gap-1">
+                         <button
+                           onClick={(e) => { e.stopPropagation(); toggleSaveWord(item); }}
+                           className={`p-2 rounded-lg transition-colors ${savedWords.some(sw => sw.word === item.word) ? 'text-indigo-600 bg-indigo-50' : 'text-gray-300 hover:text-indigo-400 hover:bg-slate-50'}`}
+                           title={savedWords.some(sw => sw.word === item.word) ? "Remove from saved" : "Save word"}
+                         >
+                           <Save className={`w-4 h-4 ${savedWords.some(sw => sw.word === item.word) ? 'fill-indigo-600' : ''}`} />
+                         </button>
+                         <button
+                           onClick={(e) => { e.stopPropagation(); playWord(item.word); }}
+                           className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                           title="Listen to pronunciation"
+                         >
+                           <Volume2 className="w-5 h-5" />
+                         </button>
+                       </div>
+                     </div>
                     {expandedWord === item.word && (
                       <div className="mt-3 pt-3 border-t border-gray-100 text-sm">
                         <p className="text-gray-700 mb-1"><span className="font-semibold text-indigo-600">Meaning:</span> {item.meaning}</p>
@@ -1722,23 +1887,36 @@ RULES for Lexi:
                 ))}
               </motion.div>
 
-              <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-6 bg-white p-6 rounded-[2rem] border border-gray-100 shadow-xl shadow-gray-100/50 mt-12 mb-20 transition-all hover:border-indigo-100">
                 <button
-                  onClick={() => setLearnPage(p => Math.max(0, p - 1))}
+                  onClick={() => {
+                    setLearnPage(p => Math.max(0, p - 1));
+                    document.querySelector('.overflow-y-auto')?.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
                   disabled={learnPage === 0}
-                  className="w-full sm:w-auto px-4 py-2 bg-gray-100 text-gray-700 rounded-lg disabled:opacity-50 hover:bg-gray-200 transition-colors font-medium"
+                  className="w-full sm:w-auto px-8 py-3 bg-indigo-50 text-indigo-600 rounded-2xl disabled:opacity-30 hover:bg-indigo-100 transition-all font-bold text-sm flex items-center justify-center gap-2 active:scale-95"
                 >
+                  <ChevronLeft className="w-5 h-5" />
                   Previous
                 </button>
-                <span className="text-gray-600 font-medium text-center text-sm sm:text-base">
-                  Showing {learnPage * wordsPerPage + 1} - {Math.min((learnPage + 1) * wordsPerPage, allLearnWords.length)} of {allLearnWords.length}
-                </span>
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-gray-900 font-black text-lg">
+                    {learnPage + 1} / {totalLearnPages}
+                  </span>
+                  <span className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em]">
+                    Page Number
+                  </span>
+                </div>
                 <button
-                  onClick={() => setLearnPage(p => Math.min(totalLearnPages - 1, p + 1))}
+                  onClick={() => {
+                    setLearnPage(p => Math.min(totalLearnPages - 1, p + 1));
+                    document.querySelector('.overflow-y-auto')?.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
                   disabled={learnPage === totalLearnPages - 1}
-                  className="w-full sm:w-auto px-4 py-2 bg-gray-100 text-gray-700 rounded-lg disabled:opacity-50 hover:bg-gray-200 transition-colors font-medium"
+                  className="w-full sm:w-auto px-8 py-3 bg-indigo-600 text-white rounded-2xl disabled:opacity-30 hover:bg-indigo-700 transition-all font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 active:scale-95"
                 >
                   Next
+                  <ChevronLeft className="w-5 h-5 rotate-180" />
                 </button>
               </div>
             </div>
@@ -1800,20 +1978,20 @@ RULES for Lexi:
                     {/* Premium Locked Test Mode */}
                     <button
                       onClick={() => {
-                        if (isPremium) {
+                        if (isPremium || user?.email === MASTER_ADMIN_EMAIL) {
                           startTest('meaning-mcq');
                         } else {
                           setSubscriptionModalOpen(true);
                         }
                       }}
-                      className={`px-6 py-4 border-2 font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 relative ${isPremium || isAdminAuthenticated
+                      className={`px-6 py-4 border-2 font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 relative ${isPremium || user?.email === MASTER_ADMIN_EMAIL
                         ? 'bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700'
                         : 'bg-white border-indigo-100 text-indigo-400 hover:border-indigo-200'
                         }`}
                     >
                       <GraduationCap className="w-6 h-6" />
                       Meaning & Context
-                      {!isPremium && (
+                      {!isPremium && user?.email !== MASTER_ADMIN_EMAIL && (
                         <Lock className="w-4 h-4 absolute top-2 right-2 text-indigo-300" />
                       )}
                     </button>
@@ -1843,6 +2021,16 @@ RULES for Lexi:
                     <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full capitalize">
                       {testMode.replace('-', ' ')}
                     </span>
+                  </div>
+
+                  {/* Timer Progress Bar */}
+                  <div className="w-full h-2 bg-gray-100 rounded-full mb-8 overflow-hidden">
+                    <motion.div
+                      initial={{ width: '100%' }}
+                      animate={{ width: `${(timeLeft / 15) * 100}%` }}
+                      transition={{ duration: 1, ease: 'linear' }}
+                      className={`h-full ${timeLeft < 5 ? 'bg-red-500' : 'bg-indigo-600'}`}
+                    />
                   </div>
 
                   {testMode !== 'visual-mcq' && (
@@ -1893,7 +2081,7 @@ RULES for Lexi:
                         value={typedAnswer}
                         onChange={e => setTypedAnswer(e.target.value)}
                         className={`border-2 rounded-xl p-4 text-xl text-center w-full mb-4 outline-none transition-all ${feedbackState === 'correct' ? 'border-green-500 bg-green-50 text-green-900' :
-                          feedbackState === 'incorrect' ? 'border-red-500 bg-red-50 text-red-900' :
+                          (feedbackState === 'incorrect' || feedbackState === 'timeout') ? 'border-red-500 bg-red-50 text-red-900' :
                             'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 text-gray-900'
                           }`}
                         placeholder="Type the word here..."
@@ -1939,7 +2127,7 @@ RULES for Lexi:
                             key={idx}
                             onClick={() => feedbackState === 'none' && handleAnswerSubmit(option)}
                             disabled={feedbackState !== 'none'}
-                            className={btnClass}
+                            className={`${btnClass} ${feedbackState === 'none' ? 'hover:scale-[1.02] active:scale-95' : ''}`}
                           >
                             {option}
                           </button>
@@ -1948,11 +2136,11 @@ RULES for Lexi:
                     </div>
                   )}
 
-                  {feedbackState === 'incorrect' && (
+                  {(feedbackState === 'incorrect' || feedbackState === 'timeout') && (
                     <div className="mt-8 max-w-md mx-auto bg-red-50 border border-red-200 rounded-2xl p-6 text-left animate-in fade-in slide-in-from-bottom-4">
                       <div className="flex items-center gap-2 text-red-600 mb-4">
-                        <X className="w-6 h-6" />
-                        <h3 className="text-xl font-bold">Incorrect</h3>
+                        <AlertCircle className="w-6 h-6" />
+                        <h3 className="text-xl font-bold">{feedbackState === 'timeout' ? "Time's Up!" : "Incorrect"}</h3>
                       </div>
                       <div className="mb-4">
                         <p className="text-sm text-gray-500 uppercase tracking-wider font-bold mb-1">Correct Word</p>
@@ -2097,8 +2285,8 @@ RULES for Lexi:
                       </div>
                       <div className="flex items-center gap-3">
                         <p className="text-slate-500 font-bold text-xs flex items-center gap-2">
-                          <Star className={`w-3.5 h-3.5 ${isPremium ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
-                          {isPremium ? 'Premium Member' : 'Free Explorer'}
+                          <Star className={`w-3.5 h-3.5 ${isPremium || user?.email === MASTER_ADMIN_EMAIL ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
+                          {user?.email === MASTER_ADMIN_EMAIL ? 'Master Admin' : (isPremium ? 'Premium Member' : 'Free Explorer')}
                         </p>
                         <button
                           onClick={async () => {
@@ -2175,7 +2363,7 @@ RULES for Lexi:
                       const height = (val / maxVal) * 100;
                       return (
                         <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                          <div 
+                          <div
                             className="w-full bg-indigo-100 rounded-t-lg relative group transition-all"
                             style={{ height: `${height}%`, minHeight: '4px' }}
                           >
@@ -2349,6 +2537,18 @@ RULES for Lexi:
                   </div>
                 </button>
                 <button
+                  onClick={() => window.open('https://github.com/Sandeepspj/LexiQuest', '_blank')}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white">
+                      <Share2 className="w-5 h-5" />
+                    </div>
+                    <span className="font-bold text-slate-700">GitHub Repository</span>
+                  </div>
+                  <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
+                </button>
+                <button
                   onClick={handleSignOut}
                   className="w-full px-6 py-4 flex items-center justify-between hover:bg-red-50 transition-colors border-b border-slate-100"
                 >
@@ -2372,19 +2572,35 @@ RULES for Lexi:
                 </button>
               </div>
 
-              <div className="text-center mb-10">
-                <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">LexiQuest v1.1</p>
               </div>
 
-              {user?.uid === SUPER_ADMIN_UID && !isAdminAuthenticated && (
-                <button
-                  onClick={() => setPinModalOpen(true)}
-                  className="w-full py-4 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-indigo-600 transition-colors mb-10"
-                >
-                  Admin Access
-                </button>
-              )}
-            </div>
+              {/* Saved Words Section */}
+              <div className="mt-8 bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm mb-8">
+                <div className="px-6 py-4 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
+                  <h3 className="text-sm font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
+                    <Bookmark className="w-4 h-4" /> Saved Vocabulary
+                  </h3>
+                  <span className="text-[10px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full">{savedWords.length} Words</span>
+                </div>
+                <div className="p-4 grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
+                  {savedWords.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 italic text-xs">No words saved yet.</div>
+                  ) : (
+                    savedWords.sort((a,b) => b.savedAt - a.savedAt).map((sw, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-slate-900 capitalize">{sw.word}</p>
+                          <p className="text-[10px] text-slate-500 line-clamp-1">{sw.meaning}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => playWord(sw.word)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Volume2 className="w-4 h-4"/></button>
+                          <button onClick={() => toggleSaveWord(sw)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
           </div>
         )}
 
@@ -2400,7 +2616,7 @@ RULES for Lexi:
                 <p className="text-gray-500 text-sm">Search any English word for its meaning, synonyms & antonyms.</p>
               </div>
 
-              {!isPremium && !isAdminAuthenticated ? (
+              {!isPremium && user?.email !== MASTER_ADMIN_EMAIL ? (
                 <div className="bg-indigo-50 rounded-[2.5rem] p-10 text-center border border-indigo-100 shadow-sm relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-400 to-transparent opacity-50" />
                   <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg text-indigo-600">
@@ -2485,39 +2701,39 @@ RULES for Lexi:
                       </div>
                     </div>
 
-                  {/* Translate to Hindi Feature */}
-                  <div className="mt-4 px-5">
-                    <button
-                      onClick={handleTranslateDict}
-                      disabled={isTranslating}
-                      className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold transition-all shadow-md ${isTranslating ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-lg active:scale-95'}`}
-                    >
-                      {isTranslating ? (
-                        <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <>
-                          <Languages className="w-5 h-5" />
-                          {hindiTranslation ? 'Refresh Hindi Translation' : 'Translate to Hindi'}
-                          {!isPremium && <Lock className="w-4 h-4 ml-1" />}
-                        </>
-                      )}
-                    </button>
-
-                    {hindiTranslation && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mt-4 bg-amber-50 border border-amber-200 p-5 rounded-2xl"
+                    {/* Translate to Hindi Feature */}
+                    <div className="mt-4 px-5">
+                      <button
+                        onClick={handleTranslateDict}
+                        disabled={isTranslating}
+                        className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold transition-all shadow-md ${isTranslating ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white hover:shadow-lg active:scale-95'}`}
                       >
-                        <div className="flex items-center gap-2 mb-2 text-amber-700 font-black uppercase text-[10px] tracking-widest">
-                          <CheckCircle className="w-4 h-4" /> Hindi Translation
-                        </div>
-                        <p className="whitespace-pre-wrap font-sans text-base text-slate-800 leading-relaxed font-semibold">
-                          {hindiTranslation}
-                        </p>
-                      </motion.div>
-                    )}
-                  </div>
+                        {isTranslating ? (
+                          <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <Languages className="w-5 h-5" />
+                            {hindiTranslation ? 'Refresh Hindi Translation' : 'Translate to Hindi'}
+                            {!isPremium && <Lock className="w-4 h-4 ml-1" />}
+                          </>
+                        )}
+                      </button>
+
+                      {hindiTranslation && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="mt-4 bg-amber-50 border border-amber-200 p-5 rounded-2xl"
+                        >
+                          <div className="flex items-center gap-2 mb-2 text-amber-700 font-black uppercase text-[10px] tracking-widest">
+                            <CheckCircle className="w-4 h-4" /> Hindi Translation
+                          </div>
+                          <p className="whitespace-pre-wrap font-sans text-base text-slate-800 leading-relaxed font-semibold">
+                            {hindiTranslation}
+                          </p>
+                        </motion.div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="p-5 space-y-6">
@@ -2638,16 +2854,16 @@ RULES for Lexi:
           </div>
         )}
 
-        {activeTab === 'ai-coach' && isPremium && (
+        {(activeTab === 'ai-coach' && (isPremium || user?.email === MASTER_ADMIN_EMAIL)) && (
           <div className="flex-1 max-w-2xl mx-auto w-full flex flex-col h-[calc(100vh-120px)] bg-slate-50">
             {/* AI Header */}
             <div className="p-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
-                  <Bot className="w-6 h-6" />
+                  <Sparkles className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-900 leading-tight">AI English Coach</h3>
+                  <h3 className="text-sm font-black text-slate-900 leading-tight">Lexi - AI Coach</h3>
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
                     <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Active Now</span>
@@ -2756,7 +2972,7 @@ RULES for Lexi:
 
 
         {/* Modals Overlay */}
-        {(pinModalOpen || alertMessage || confirmModalOpen || clearConfirmModalOpen || reminderPopoverOpen || deleteModalOpen) && (
+        {(alertMessage || confirmModalOpen || clearConfirmModalOpen || reminderPopoverOpen || deleteModalOpen) && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
 
             {/* Reminder Popover */}
@@ -2806,35 +3022,7 @@ RULES for Lexi:
               </div>
             )}
 
-            {/* PIN Modal */}
-            {pinModalOpen && (
-              <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-xl font-bold flex items-center gap-2">
-                    <Lock className="w-5 h-5 text-indigo-600" />
-                    Admin Access
-                  </h3>
-                  <button onClick={() => { setPinModalOpen(false); setPinError(''); setPinInput(''); }} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <form onSubmit={handlePinSubmit}>
-                  <p className="text-sm text-gray-600 mb-4">Enter the PIN to access the admin panel.</p>
-                  <input
-                    type="password"
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value)}
-                    placeholder="Enter PIN (1234)"
-                    autoFocus
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none mb-2 text-center tracking-widest text-lg"
-                  />
-                  {pinError && <p className="text-red-500 text-sm mb-4">{pinError}</p>}
-                  <button type="submit" className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors mt-4">
-                    Unlock
-                  </button>
-                </form>
-              </div>
-            )}
+            {/* PIN Modal Removed */}
 
             {/* Alert Modal */}
             {alertMessage && (
@@ -2966,13 +3154,20 @@ RULES for Lexi:
 
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Voice Selection</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Voice Selection (Indian Accents Available)</label>
                   <select
                     value={selectedVoiceURI}
                     onChange={(e) => setSelectedVoiceURI(e.target.value)}
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all appearance-none bg-gray-50 text-gray-800"
                   >
-                    {availableVoices.filter(v => v.lang.startsWith('en')).map(voice => (
+                    {/* Priority Indian Voices */}
+                    {availableVoices.filter(v => v.lang.startsWith('en-IN')).map((voice, i) => (
+                      <option key={voice.voiceURI} value={voice.voiceURI} className="font-bold text-indigo-600">
+                        {voice.name.includes('Female') || voice.name.includes('Aditi') ? `🇮🇳 Lexi (Girl ${i+1})` : `🇮🇳 Voice (Boy ${i+1})`}
+                      </option>
+                    ))}
+                    {/* Other English Voices */}
+                    {availableVoices.filter(v => !v.lang.startsWith('en-IN') && v.lang.startsWith('en')).map(voice => (
                       <option key={voice.voiceURI} value={voice.voiceURI}>
                         {voice.name} ({voice.lang})
                       </option>
@@ -3259,43 +3454,77 @@ RULES for Lexi:
           <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-6 backdrop-blur-sm">
             <div className="bg-white rounded-[2rem] w-full max-w-md p-8 shadow-2xl animate-in fade-in zoom-in duration-300">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-black text-slate-900">Add Global Word</h3>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900">{isBulkMode ? 'Bulk Upload Words' : 'Add Global Word'}</h3>
+                  <button 
+                    onClick={() => setIsBulkMode(!isBulkMode)}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-700 mt-1 uppercase"
+                  >
+                    Switch to {isBulkMode ? 'Single Mode' : 'Bulk Mode'}
+                  </button>
+                </div>
                 <button onClick={() => setAdminAddModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full"><X className="w-5 h-5" /></button>
               </div>
               <div className="space-y-4">
-                <input
-                  type="text"
-                  placeholder="Word"
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
-                  value={newWordData.word}
-                  onChange={e => setNewWordData({ ...newWordData, word: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="Meaning"
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
-                  value={newWordData.meaning}
-                  onChange={e => setNewWordData({ ...newWordData, meaning: e.target.value })}
-                />
-                <textarea
-                  placeholder="Example Sentence"
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 h-24"
-                  value={newWordData.example}
-                  onChange={e => setNewWordData({ ...newWordData, example: e.target.value })}
-                />
-                <select
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
-                  value={newWordData.category}
-                  onChange={e => setNewWordData({ ...newWordData, category: e.target.value })}
-                >
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                {isBulkMode ? (
+                  <>
+                    <div className="bg-amber-50 p-3 rounded-xl border border-amber-100 mb-2">
+                      <p className="text-[10px] text-amber-700 leading-tight">
+                        Format: <b>Word: Meaning: Example</b> (one per line).<br/>
+                        Example: <i>Apple: Seb: An apple a day.</i>
+                      </p>
+                    </div>
+                    <textarea
+                      placeholder="Paste your words here..."
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 h-64 font-mono text-xs"
+                      value={bulkInput}
+                      onChange={e => setBulkInput(e.target.value)}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      placeholder="Word"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                      value={newWordData.word}
+                      onChange={e => setNewWordData({ ...newWordData, word: e.target.value })}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Meaning"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                      value={newWordData.meaning}
+                      onChange={e => setNewWordData({ ...newWordData, meaning: e.target.value })}
+                    />
+                    <textarea
+                      placeholder="Example Sentence"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 h-24"
+                      value={newWordData.example}
+                      onChange={e => setNewWordData({ ...newWordData, example: e.target.value })}
+                    />
+                  </>
+                )}
+                <div className="pt-2">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 pl-1">Category for these words</p>
+                  <select
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                    value={newWordData.category}
+                    onChange={e => setNewWordData({ ...newWordData, category: e.target.value })}
+                  >
+                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
                 <button
                   onClick={handleAdminAddWord}
                   disabled={isAiLoading}
-                  className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50"
+                  className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
                 >
-                  {isAiLoading ? 'Adding...' : 'Save Word'}
+                  {isAiLoading ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>{isBulkMode ? <FileText className="w-5 h-5" /> : <Plus className="w-5 h-5" />} {isBulkMode ? 'Bulk Save' : 'Save Word'}</>
+                  )}
                 </button>
               </div>
             </div>
