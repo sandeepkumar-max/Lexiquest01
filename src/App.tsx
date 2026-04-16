@@ -1,3 +1,15 @@
+// --- EMERGENCY NUCLEAR DIAGNOSTICS ---
+if (typeof window !== 'undefined') {
+  console.log("LexiQuest JS Bundle Executing...");
+  window.onerror = (msg, url, line, col, error) => {
+    const errorMsg = `CRITICAL JS ERROR: ${msg} \nAt: ${url}:${line}:${col} \nObject: ${JSON.stringify(error)}`;
+    console.error(errorMsg);
+    // Use native alert if possible, otherwise browser alert
+    alert(errorMsg);
+  };
+}
+// -------------------------------------
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -101,10 +113,11 @@ function App() {
   // AdMob State
   const [adInitialized, setAdInitialized] = useState(false);
   const [isPremium, setIsPremium] = useState(() => {
-    // Immediate Admin Check
-    const localEmail = localStorage.getItem('userEmail');
-    if (localEmail === MASTER_ADMIN_EMAIL) return true;
-    return localStorage.getItem('isPremium') === 'true';
+    try {
+      const localEmail = localStorage.getItem('userEmail');
+      if (localEmail === MASTER_ADMIN_EMAIL) return true;
+      return localStorage.getItem('isPremium') === 'true';
+    } catch (e) { return false; }
   });
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
@@ -499,13 +512,18 @@ function App() {
 
   // Safe Splash Hiding
   useEffect(() => {
-    if (!authLoading && Capacitor.isNativePlatform()) {
-      // Delay slightly to ensure React has rendered the child component (Auth or Main)
-      setTimeout(() => {
+    console.log("App Component Mounted - Triggering Splash Hide");
+    if (Capacitor.isNativePlatform()) {
+      // Force hide splash as soon as App mounts to prevent Black Screen
+      SplashScreen.hide().catch(() => {});
+      
+      // Secondary backup hide for insurance
+      const timer = setTimeout(() => {
         SplashScreen.hide().catch(() => {});
-      }, 300);
+      }, 500);
+      return () => clearTimeout(timer);
     }
-  }, [authLoading]);
+  }, []);
 
   useEffect(() => {
     const listener = FirebaseAuthentication.addListener('authStateChange', async (result) => {
