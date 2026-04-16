@@ -80,8 +80,9 @@ export default function App() {
   const timerRef = useRef<any>(null);
 
   // Sound effects
-  const correctSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3'), []);
-  const wrongSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2015/2015-preview.mp3'), []);
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('soundEnabled') !== 'false');
+  const correctSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3'), []);
+  const wrongSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3'), []);
 
   // Streak State
   const [streak, setStreak] = useState(() => parseInt(localStorage.getItem('streak') || '0'));
@@ -1253,7 +1254,7 @@ export default function App() {
 
   const handleTimeout = () => {
     if (feedbackState !== 'none') return;
-    wrongSound.play().catch(() => {});
+    if (soundEnabled) wrongSound.play().catch(() => {});
     setFeedbackState('timeout');
     const newAnswers = [...userAnswers, '']; // Blank for timeout
     setUserAnswers(newAnswers);
@@ -1307,7 +1308,7 @@ export default function App() {
     const isCorrect = answer.toLowerCase() === testWords[currentTestWordIndex].toLowerCase();
 
     if (isCorrect) {
-      correctSound.play().catch(() => {});
+      if (soundEnabled) correctSound.play().catch(() => {});
       setFeedbackState('correct');
       addXp(10); // Reward for correct answer
       updateMission('correct-10', 1);
@@ -1315,7 +1316,7 @@ export default function App() {
         handleNextQuestion(currentTestWordIndex);
       }, 1000);
     } else {
-      wrongSound.play().catch(() => {});
+      if (soundEnabled) wrongSound.play().catch(() => {});
       setFeedbackState('incorrect');
     }
   };
@@ -2080,13 +2081,22 @@ export default function App() {
                 <>
                   <div className="flex justify-between items-center mb-8 text-sm font-medium text-gray-500">
                     <button
-                      onClick={() => {
-                        window.speechSynthesis?.cancel();
-                        TextToSpeech.stop().catch(() => { });
-                        setTestState('start');
-                        setFeedbackState('none');
-                        setTypedAnswer('');
-                        setUserAnswers([]);
+                      onClick={async () => {
+                        const { value } = await Dialog.confirm({
+                          title: 'Exit Test?',
+                          message: 'Are you sure you want to stop? Your progress will not be saved.',
+                          okButtonTitle: 'Yes, Exit',
+                          cancelButtonTitle: 'Stay'
+                        });
+                        
+                        if (value) {
+                          window.speechSynthesis?.cancel();
+                          TextToSpeech.stop().catch(() => { });
+                          setTestState('start');
+                          setFeedbackState('none');
+                          setTypedAnswer('');
+                          setUserAnswers([]);
+                        }
                       }}
                       className="flex items-center gap-1 text-gray-400 hover:text-red-500 transition-colors"
                       title="Exit Test"
@@ -2613,6 +2623,28 @@ export default function App() {
                     <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
                   </div>
                 </button>
+
+                <div className="w-full px-6 py-4 flex items-center justify-between border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+                      <Volume2 className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <span className="font-bold text-slate-800 block">Sound Effects</span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Feedback & Alerts</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newVal = !soundEnabled;
+                      setSoundEnabled(newVal);
+                      localStorage.setItem('soundEnabled', newVal.toString());
+                    }}
+                    className={`w-12 h-6 rounded-full transition-colors relative ${soundEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${soundEnabled ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
                 <button
                   onClick={() => window.open('https://github.com/Sandeepspj/LexiQuest', '_blank')}
                   className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
