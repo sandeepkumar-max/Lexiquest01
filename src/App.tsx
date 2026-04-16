@@ -478,8 +478,6 @@ function App() {
             setUser(null);
           }
         }
-        
-        }
       } catch (err: any) {
         console.error('Failed to get current user/role', err);
         setErrorLog(prev => [...prev, `Boot Error: ${err.message}`]);
