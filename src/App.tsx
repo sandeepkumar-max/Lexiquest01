@@ -15,6 +15,7 @@ import Auth from './components/Auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { Purchases, LOG_LEVEL, PACKAGE_TYPE } from '@revenuecat/purchases-capacitor';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
+import { SplashScreen } from '@capacitor/splash-screen';
 
 type Tab = 'learn' | 'test' | 'dictionary' | 'ai-coach' | 'profile';
 
@@ -65,6 +66,9 @@ export default function App() {
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
   const ADMOB_INTERSTITIAL_ID = import.meta.env.VITE_ADMOB_INTERSTITIAL_ID || 'ca-app-pub-3271133689051975/5794528015';
+  const isPluginsInitialized = useRef(false);
+  const [adReady, setAdReady] = useState(false);
+  const [errorLog, setErrorLog] = useState<string[]>([]);
 
   // Test State
   const [testState, setTestState] = useState<'start' | 'testing' | 'results'>('start');
@@ -226,27 +230,48 @@ export default function App() {
     if (user) {
       fetchAiWords();
 
-      // Initialize RevenueCat
-      const setupPurchases = async () => {
+      // Singleton Plugin Setup
+      const initPlugins = async () => {
+        if (isPluginsInitialized.current) return;
+        
         if (Capacitor.isNativePlatform()) {
           try {
+            console.log("Initializing Plugins...");
+            // RevenueCat
             await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
             await Purchases.configure({ apiKey: import.meta.env.VITE_REVENUECAT_API_KEY });
+            
+            // AdMob
+            await AdMob.initialize();
+            setAdInitialized(true);
+            
+            isPluginsInitialized.current = true;
+            console.log("Plugins Initialized Successfully");
+          } catch (e: any) {
+            console.error("Plugin Init Error:", e);
+            setErrorLog(prev => [...prev, `Plugin Init Error: ${e.message}`]);
+          }
+        }
+      };
+      initPlugins();
 
-            // Check status on start
+      // Check Subscription Status
+      const checkStatus = async () => {
+        if (Capacitor.isNativePlatform()) {
+          try {
             const info = await Purchases.getCustomerInfo();
             const customerInfo = (info as any).customerInfo || info;
-            
             if (user.email === MASTER_ADMIN_EMAIL || customerInfo?.entitlements?.active['premium']) {
               setIsPremium(true);
               localStorage.setItem('isPremium', 'true');
             }
-          } catch (e: any) {
-            console.error("RevenueCat setup/info error:", e);
+          } catch (e) {
+            console.error("Status Check Error:", e);
           }
         }
       };
-      setupPurchases();
+      checkStatus();
+
       // Internal Admin Check (Stealth)
       if (user.email === MASTER_ADMIN_EMAIL) {
         setIsPremium(true);
@@ -254,7 +279,7 @@ export default function App() {
         localStorage.setItem('userEmail', user.email);
       }
       
-      // Fetch Saved Words for user
+      // Fetch Saved Words
       const fetchSavedWords = async () => {
         try {
           const { snapshots } = await FirebaseFirestore.getCollection({ reference: `users/${user.uid}/saved_words` });
@@ -287,51 +312,66 @@ export default function App() {
     }
   }, [testState]);
 
-  // Initialize AdMob and setup periodic interstitial
+  // AdMob Periodic Interstitial Loop
   useEffect(() => {
-    // ADMIN BYPASS: No ads for admin or premium users
+    // BYPASS: No ads for admin or premium users
     const isMasterAdmin = user?.email === MASTER_ADMIN_EMAIL;
-    if (!Capacitor.isNativePlatform() || !user || isPremium || isMasterAdmin) {
+    if (!Capacitor.isNativePlatform() || !user || isPremium || isMasterAdmin || !adInitialized) {
       return;
     }
 
     let adInterval: any;
 
-    const setupAds = async () => {
+    const prepareAndShow = async () => {
       try {
-        await AdMob.initialize();
-        setAdInitialized(true);
-
-        // Prepare first ad
-        await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false }).catch(() => { });
-
-        // Setup 120 second interval (2 minutes)
+        console.log("Preparing Interstitial Ad...");
+        await AdMob.prepareInterstitial({ 
+          adId: ADMOB_INTERSTITIAL_ID, 
+          isTesting: false // Set to false for production
+        });
+        setAdReady(true);
+        
+        // Wait 120 seconds before first ad
         adInterval = setInterval(async () => {
-          if (!user || isPremium) return; // Double protection
+          if (!user || isPremium || !isPluginsInitialized.current) return;
           try {
+            console.log("Showing Interstitial Ad...");
             await AdMob.showInterstitial();
-            // Prepare next ad immediately after show
+            setAdReady(false);
+            // Prepare next ad
             await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false }).catch(() => { });
-          } catch (e) {
-            console.error('Interstitial show/prepare error:', e);
-            // Re-prepare on error to try again next time
+            setAdReady(true);
+          } catch (e: any) {
+            console.error('Ad Show Error:', e);
+            // Re-prepare on error
             await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false }).catch(() => { });
           }
-        }, 120000); // 120 seconds
-      } catch (err) {
-        console.error('AdMob setup error:', err);
+        }, 120000);
+      } catch (err: any) {
+        console.error('AdMob prepare error:', err);
+        setErrorLog(prev => [...prev, `AdMob Error: ${err.message}`]);
       }
     };
 
-    setupAds();
+    prepareAndShow();
 
     return () => {
       if (adInterval) clearInterval(adInterval);
     };
-  }, [user, isPremium]);
+  }, [user, isPremium, adInitialized]);
 
   // AdMob and setup periodic interstitial
 
+
+  // Global Error Handler
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      console.error("Global Error Caught:", event.error);
+      setErrorLog(prev => [...prev, `JS Error: ${event.error?.message || 'Unknown'}`]);
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
 
   // Firebase Authentication State Listener
   useEffect(() => {
@@ -385,8 +425,16 @@ export default function App() {
             setUser(null);
           }
         }
+        
+        // Hide Splash Screen once initial check is done
+        if (Capacitor.isNativePlatform()) {
+          SplashScreen.hide().catch(() => {});
+        }
       } catch (err) {
         console.error('Failed to get current user/role', err);
+        if (Capacitor.isNativePlatform()) {
+          SplashScreen.hide().catch(() => {});
+        }
       } finally {
         setAuthLoading(false);
       }
@@ -2468,6 +2516,28 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {user?.email === MASTER_ADMIN_EMAIL && (
+                <div className="mb-8 p-6 bg-amber-50 rounded-[2rem] border border-amber-100 shadow-sm">
+                  <div className="flex items-center gap-3 text-amber-600 mb-2">
+                    <Star className="w-5 h-5 fill-amber-500" />
+                    <span className="text-sm font-black uppercase tracking-widest">Admin Ad Bypass</span>
+                  </div>
+                  <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                    Ads are disabled for <b>{user.email}</b> to ensure a smooth administrative experience. 
+                    Testing ads is recommended on a regular explorer account.
+                  </p>
+                  
+                  {errorLog.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-amber-200">
+                      <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-2">Internal Debug Log</p>
+                      <div className="bg-white/50 rounded-xl p-3 font-mono text-[10px] text-amber-900 max-h-32 overflow-y-auto">
+                        {errorLog.map((log, i) => <div key={i} className="mb-1 border-b border-amber-100 pb-1 last:border-none">{log}</div>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Global Leaderboard Section */}
               <div className="mb-8">
