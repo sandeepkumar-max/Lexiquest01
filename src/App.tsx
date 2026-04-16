@@ -1385,6 +1385,15 @@ export default function App() {
         const audio = new Audio(audioUrl.startsWith('//') ? 'https:' + audioUrl : audioUrl);
         setDictAudio(audio);
       } else {
+        setDictAudio(null);
+      }
+    } catch {
+      setDictError('Network error. Please check your internet connection.');
+    } finally {
+      setDictLoading(false);
+    }
+  };
+
   const handleTranslateDict = async () => {
     if (!hasPremium) {
       setSubscriptionModalOpen(true);
