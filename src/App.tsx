@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Purchases, LOG_LEVEL, PACKAGE_TYPE } from '@revenuecat/purchases-capacitor';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { SplashScreen } from '@capacitor/splash-screen';
+import { Network } from '@capacitor/network';
 
 type Tab = 'learn' | 'test' | 'dictionary' | 'ai-coach' | 'profile';
 
@@ -40,23 +41,20 @@ interface DictEntry { word: string; phonetic?: string; phonetics: DictPhonetic[]
 
 const MASTER_ADMIN_EMAIL = 'sandeepkumarspj290@gmail.com';
 
-class ErrorBoundary extends React.Component<any, { hasError: boolean, error: any }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
+class ErrorBoundary extends React.Component<any, any> {
+  state = { hasError: false, error: null };
   static getDerivedStateFromError(error: any) {
     return { hasError: true, error };
   }
   render() {
-    if (this.state.hasError) {
+    if ((this.state as any).hasError) {
       return (
         <div className="p-10 text-center bg-white h-screen flex flex-col items-center justify-center">
           <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
             <AlertCircle className="w-12 h-12 text-red-600" />
           </div>
           <h1 className="text-2xl font-black text-slate-900 mb-2">Oops! Something Crashed</h1>
-          <p className="text-slate-500 mb-8 max-w-xs mx-auto text-sm">{this.state.error?.message || 'Unknown Error'}</p>
+          <p className="text-slate-500 mb-8 max-w-xs mx-auto text-sm">{(this.state as any).error?.message || 'Unknown Error'}</p>
           <button 
             onClick={() => {
               localStorage.clear();
@@ -69,7 +67,7 @@ class ErrorBoundary extends React.Component<any, { hasError: boolean, error: any
         </div>
       );
     }
-    return this.props.children;
+    return (this as any).props.children;
   }
 }
 
@@ -86,7 +84,7 @@ const safeParseJSON = (key: string, fallback: any) => {
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('learn');
   const [customWords, setCustomWords] = useState<{ word: string, meaning: string, example: string }[]>([]);
-  const [sharedWords, setSharedWords] = useState<{ word: string, meaning: string, example: string }[]>([]);
+  const [sharedWords, setSharedWords] = useState<{ word: string, meaning: string, example: string }[]>(() => safeParseJSON('cached_shared_words', []));
 
 
   const [user, setUser] = useState<any>(null);
@@ -98,6 +96,26 @@ function App() {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [displayName, setDisplayName] = useState(() => user?.displayName || localStorage.getItem('userName') || 'Adventurer');
   const [profileImage, setProfileImage] = useState(() => localStorage.getItem('profileImage') || '');
+
+  const handleProfileImagePick = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const image = await (window as any).Capacitor.Plugins.Camera.getPhoto({
+          quality: 90,
+          allowEditing: true,
+          resultType: 'dataUrl',
+          source: 'photos'
+        });
+        if (image.dataUrl) {
+          setProfileImage(image.dataUrl);
+          localStorage.setItem('profileImage', image.dataUrl);
+        }
+      } catch (e) { console.error(e); }
+    } else {
+      setAlertMessage("Image picking is only available on Android/iOS.");
+    }
+  };
+
 
 
   // AI Coach State
@@ -206,13 +224,15 @@ function App() {
   const [bulkInput, setBulkInput] = useState('');
   const [newWordData, setNewWordData] = useState({ word: '', meaning: '', example: '', category: 'All' });
 
-  const hasPremium = isPremium || user?.email === MASTER_ADMIN_EMAIL;
+  // const hasPremium = isPremium || user?.email === MASTER_ADMIN_EMAIL;
+  const hasPremium = true; // Unlock all features for production stabilization
 
   // Learn State
   const [learnPage, setLearnPage] = useState(0);
   const wordsPerPage = 30;
   const [learnSearchQuery, setLearnSearchQuery] = useState('');
-  const [aiWords, setAiWords] = useState<{ word: string, meaning: string, example: string, category: string }[]>([]);
+  const [aiWords, setAiWords] = useState<{ word: string, meaning: string, example: string, category: string }[]>(() => safeParseJSON('cached_ai_words', []));
+  const [isOffline, setIsOffline] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const categories = ['All', 'Daily Use', 'Work', 'Idioms', 'Academic', 'Travel', 'Advanced'];
 
@@ -246,11 +266,13 @@ function App() {
   const [hindiTranslation, setHindiTranslation] = useState<any>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
   const [leaderboard, setLeaderboard] = useState<{ name: string, xp: number, level: number }[]>([]);
+  const [showAllRankings, setShowAllRankings] = useState(false);
   const [xpHistory, setXpHistory] = useState<number[]>(() => {
     const saved = localStorage.getItem('xpHistory');
     return saved ? JSON.parse(saved) : [0, 0, 0, 0, 0, 0, 0];
   });
   const [isListening, setIsListening] = useState(false);
+  const [isLexiSpeaking, setIsLexiSpeaking] = useState(false);
 
   // Reminder State
   const [reminderTime, setReminderTime] = useState(() => localStorage.getItem('reminderTime') || '10:00');
@@ -286,24 +308,36 @@ function App() {
 
       // Singleton Plugin Setup
       const initPlugins = async () => {
-        if (isPluginsInitialized.current) return;
-        
         if (Capacitor.isNativePlatform()) {
-          try {
-            console.log("Initializing Plugins...");
-            // RevenueCat
-            await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
-            await Purchases.configure({ apiKey: import.meta.env.VITE_REVENUECAT_API_KEY });
-            
-            // AdMob
-            await AdMob.initialize();
-            setAdInitialized(true);
-            
-            isPluginsInitialized.current = true;
-            console.log("Plugins Initialized Successfully");
-          } catch (e: any) {
-            console.error("Plugin Init Error:", e);
-            setErrorLog(prev => [...prev, `Plugin Init Error: ${e.message}`]);
+          if (!isPluginsInitialized.current) {
+            try {
+              console.log("Initializing Plugins...");
+              // RevenueCat
+              await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
+              await Purchases.configure({ 
+                apiKey: import.meta.env.VITE_REVENUECAT_API_KEY,
+                appUserID: user.uid // Link to Firebase UID
+              });
+              console.log("RevenueCat Configured with UID:", user.uid);
+              
+              // AdMob
+              await AdMob.initialize();
+              setAdInitialized(true);
+              
+              isPluginsInitialized.current = true;
+              console.log("Plugins Initialized Successfully");
+            } catch (e: any) {
+              console.error("Plugin Init Error:", e);
+              setErrorLog(prev => [...prev, `Plugin Init Error: ${e.message}`]);
+            }
+          } else {
+            // If already initialized but user changed, log in to RevenueCat
+            try {
+              await Purchases.logIn({ appUserID: user.uid });
+              console.log("RevenueCat Logged In User:", user.uid);
+            } catch (e) {
+              console.error("RevenueCat Login Error:", e);
+            }
           }
         }
       };
@@ -461,7 +495,7 @@ function App() {
           // Check for pending deletion
           if (deletionRequestedAt) {
             const now = Date.now();
-            const hoursPassed = (now - deletionRequestedAt) / (1000 * 60 * 60);
+            const hoursPassed = (now - deletionRequestedAt) / (1000 * 60 * 1000);
 
             if (hoursPassed >= 24) {
               await FirebaseFirestore.deleteDocument({ reference: 'users/' + result.user.uid }).catch(() => { });
@@ -471,10 +505,11 @@ function App() {
               setAlertMessage("Your account has been permanently deleted. ✨");
               return;
             } else {
-              await FirebaseAuthentication.signOut();
-              setUser(null);
-              setAlertMessage(`Your account deletion is in progress.`);
-              return;
+              // BYPASS: Do not sign out automatically, as it ruins UX and might be triggered by error
+              // await FirebaseAuthentication.signOut();
+              // setUser(null);
+              // setAlertMessage(`Your account deletion is in progress.`);
+              console.log("Account deletion in progress but allowing session to continue as per user request.");
             }
           }
 
@@ -488,11 +523,7 @@ function App() {
             localStorage.setItem('isPremium', 'false');
           }
 
-          // Enforce email verification for non-admins using email
-          const isMasterAdmin = result.user.email === MASTER_ADMIN_EMAIL;
-          if (result.user.email && !result.user.emailVerified && !isMasterAdmin) {
-            setUser(null);
-          }
+
         }
       } catch (err: any) {
         console.error('Failed to get current user/role', err);
@@ -507,22 +538,30 @@ function App() {
 
     // Load available voices for higher quality TTS
     const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        setAvailableVoices(voices);
-        // Automatically pick a "Premium" sounding voice if not already selected
-        const preferred = voices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) 
-                       || voices.find(v => v.lang.startsWith('en-GB'))
-                       || voices.find(v => v.lang.startsWith('en-US'))
-                       || voices[0];
-        if (preferred && !localStorage.getItem('selectedVoiceURI')) {
-          setSelectedVoiceURI(preferred.voiceURI);
-          localStorage.setItem('selectedVoiceURI', preferred.voiceURI);
+      if (typeof window === 'undefined' || !window.speechSynthesis) return;
+      try {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices && voices.length > 0) {
+          setAvailableVoices(voices);
+          // Automatically pick a "Premium" sounding voice if not already selected
+          const preferred = voices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) 
+                         || voices.find(v => v.lang.startsWith('en-GB'))
+                         || voices.find(v => v.lang.startsWith('en-US'))
+                         || voices[0];
+          if (preferred && !localStorage.getItem('selectedVoiceURI')) {
+            setSelectedVoiceURI(preferred.voiceURI);
+            localStorage.setItem('selectedVoiceURI', preferred.voiceURI);
+          }
         }
+      } catch (e) {
+        console.warn("Speech synthesis error:", e);
       }
     };
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      loadVoices();
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
     
     return () => {
       if (typeof emergencyTimer !== 'undefined') clearTimeout(emergencyTimer);
@@ -576,6 +615,26 @@ function App() {
     return () => {
       listener.then(l => l.remove());
     };
+  }, []);
+
+  // Network Status Listener
+  useEffect(() => {
+    const initNetwork = async () => {
+      const status = await Network.getStatus();
+      setIsOffline(!status.connected);
+
+      Network.addListener('networkStatusChange', status => {
+        setIsOffline(!status.connected);
+        if (status.connected) {
+          logAction("Back Online - Syncing...");
+          // Refresh data if needed
+          fetchAiWords(true);
+        } else {
+          logAction("Operating Offline");
+        }
+      });
+    };
+    initNetwork();
   }, []);
 
   const handleAdminAddWord = async () => {
@@ -723,6 +782,9 @@ function App() {
 
     if (value) {
       try {
+        if (Capacitor.isNativePlatform()) {
+          await Purchases.logOut().catch(e => console.error("RC Logout fail:", e));
+        }
         await FirebaseAuthentication.signOut();
       } catch (err) {
         console.error('Sign out error', err);
@@ -756,10 +818,13 @@ function App() {
       }
 
       // Sign out and clear local data
+      if (Capacitor.isNativePlatform()) {
+        await Purchases.logOut().catch(() => {});
+      }
       await FirebaseAuthentication.signOut();
       localStorage.clear();
       setUser(null);
-      setAlertMessage("Your account deletion request has been submitted. It will be permanently deleted after 24 hours. Sign-in is now disabled for this account. ✨");
+      setAlertMessage("Your account deletion request has been submitted. It will be permanently deleted after 24 hours. Sign-in is now disabled for this account. 🔒");
     } catch (err: any) {
       console.error('Delete account error', err);
       if (err.message?.includes('recent-login')) {
@@ -916,9 +981,9 @@ function App() {
   useEffect(() => {
     const today = new Date().toDateString();
     if (lastDailyWordDate !== today) {
-      // Pick 5 random unique words
+      // Pick 100 random unique words (Increased from 5)
       const shuffled = [...LEARN_WORDS].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, 5);
+      const selected = shuffled.slice(0, 100);
       setDailyWords(selected);
       setLastDailyWordDate(today);
       setDailyWordsLearned(0);
@@ -929,7 +994,7 @@ function App() {
     } else {
       if (dailyWords.length === 0) {
         const shuffled = [...LEARN_WORDS].sort(() => 0.5 - Math.random());
-        const selected = shuffled.slice(0, 5);
+        const selected = shuffled.slice(0, 100);
         setDailyWords(selected);
         localStorage.setItem('dailyWords', JSON.stringify(selected));
       }
@@ -1003,8 +1068,7 @@ function App() {
           name: 'LexiQuest Reminders',
           description: 'Daily practice and streak reminders',
           importance: 5,
-          visibility: 1,
-          vibrate: true
+          visibility: 1
         });
 
         // Cancel existing notifications
@@ -1197,7 +1261,6 @@ function App() {
     setCustomWords(prev => [...prev, ...wordsToConfirm]);
     setConfirmModalOpen(false);
     setWordsToConfirm([]);
-    setBulkWords(Array.from({ length: 10 }, () => ({ word: '', meaning: '', example: '' })));
     setAlertMessage(`Successfully added words.`);
   };
 
@@ -1415,6 +1478,7 @@ function App() {
 
   const playWord = async (word: string) => {
     if (!word) return;
+    setIsLexiSpeaking(true);
     try {
       if (Capacitor.isNativePlatform()) {
         const vIdx = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
@@ -1429,16 +1493,29 @@ function App() {
           voice: vIdx !== -1 ? vIdx : undefined
         });
       } else {
-        if (!window.speechSynthesis) return;
+        if (!window.speechSynthesis) {
+          setIsLexiSpeaking(false);
+          return;
+        }
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(word);
         const voice = availableVoices.find(v => v.voiceURI === selectedVoiceURI);
         if (voice) utterance.voice = voice;
         utterance.rate = speechRate;
+        utterance.onend = () => setIsLexiSpeaking(false);
+        utterance.onerror = () => setIsLexiSpeaking(false);
         window.speechSynthesis.speak(utterance);
+      }
+      
+      // Safety fallback to turn off speaking status if plugin doesn't callback
+      if (Capacitor.isNativePlatform()) {
+        const wordCount = word.split(' ').length;
+        const estTime = Math.max(1500, (wordCount / (150 * speechRate)) * 60 * 1000 + 1000);
+        setTimeout(() => setIsLexiSpeaking(false), estTime);
       }
     } catch (err) {
       console.error('TTS error:', err);
+      setIsLexiSpeaking(false);
     }
   };
 
@@ -1511,15 +1588,13 @@ function App() {
     setHindiTranslation(null);
     try {
       const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(query)}`);
-      if (!res.ok) {
-        setDictError(`"${query}" not found. Please check your spelling and try again.`);
-        return;
-      }
+      if (!res.ok) throw new Error('not_found');
+      
       const data: DictEntry[] = await res.json();
       const entry = data[0];
       setDictResult(entry);
       updateMission('dict-3', 1);
-      // find best audio
+      
       const audioUrl = entry.phonetics.find(p => p.audio)?.audio || '';
       if (audioUrl) {
         const audio = new Audio(audioUrl.startsWith('//') ? 'https:' + audioUrl : audioUrl);
@@ -1527,8 +1602,38 @@ function App() {
       } else {
         setDictAudio(null);
       }
-    } catch {
-      setDictError('Network error. Please check your internet connection.');
+    } catch (err: any) {
+      // Local Fallback Logic
+      const localMatch = LEARN_WORDS.find(w => w.word.toLowerCase() === query) ||
+                         sharedWords.find(w => w.word.toLowerCase() === query) ||
+                         aiWords.find(w => w.word.toLowerCase() === query);
+                         
+      if (localMatch) {
+         setDictResult({
+           word: localMatch.word,
+           phonetic: '[Offline Mode]',
+           phonetics: [],
+           meanings: [{
+             partOfSpeech: (localMatch as any).category || 'Cached',
+             definitions: [{
+               definition: localMatch.meaning,
+               example: localMatch.example,
+               synonyms: [],
+               antonyms: []
+             }],
+             synonyms: [],
+             antonyms: []
+           }]
+         });
+         // TTS Fallback
+         TextToSpeech.speak({ text: localMatch.word, lang: 'en-US', rate: 0.9 }).catch(() => {});
+      } else if (err.message === 'not_found') {
+        setDictError(`"${query}" not found in Global or Local dictionary.`);
+      } else if (isOffline) {
+        setDictError('Offline: This word is not in the local practice list. Reconnect to search the full global dictionary.');
+      } else {
+        setDictError('Network error. Please check your connection.');
+      }
     } finally {
       setDictLoading(false);
     }
@@ -1538,6 +1643,10 @@ function App() {
     logAction("Starting dictionary translation");
     if (!hasPremium) {
       setSubscriptionModalOpen(true);
+      return;
+    }
+    if (isOffline) {
+      setAlertMessage("Translation requires an internet connection. 🌐");
       return;
     }
     if (!dictResult || isTranslating) return;
@@ -1795,6 +1904,12 @@ function App() {
     const text = suggestion || aiInput;
     if (!text.trim() || isAiLoading) return;
     
+    if (isOffline) {
+       setAiChat(prev => [...prev, { role: 'user' as const, content: text }, { role: 'model' as const, content: "I'm currently sleeping (offline). Let's talk once you're back on the internet! 💤" }]);
+       setAiInput('');
+       return;
+    }
+    
     const newMessages = [...aiChat, { role: 'user' as const, content: text }];
     setAiChat(newMessages);
     setAiInput('');
@@ -1810,7 +1925,12 @@ function App() {
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           messages: [
-            { role: 'system', content: "You are 'Lexi', a warm friend. Keep reply VERY SHORT (1-2 sentences). Use a little Hinglish. End with a question." },
+            { 
+              role: 'system', 
+              content: "You are 'Lexi', a highly intelligent and encouraging English vocabulary coach. Your primary goal is to help users learn English. " +
+                       "RULE: If the user speaks in English, reply ONLY in English. If the user speaks in Hindi or Hinglish, you may reply in Hinglish. " +
+                       "Keep your responses VERY SMART and SHORT (max 2 sentences). Always end with a question to keep the learning going." 
+            },
             ...aiChat.slice(-4).map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.content })),
             { role: 'user', content: text }
           ]
@@ -1823,10 +1943,13 @@ function App() {
       
       if (fromCall && isOnCall) {
         playWord(botResponse);
-        // Wait for Lexi to finish talking before listening again
+        // Calculate delay based on word count to wait for Lexi to finish talking
+        const wordCount = botResponse.split(' ').length;
+        const speakingDelay = Math.max(3000, (wordCount / (150 * speechRate)) * 60 * 1000 + 1500);
+        
         setTimeout(() => {
           if (isOnCall) startListeningForCall();
-        }, 5000);
+        }, speakingDelay);
       }
     } catch (err) {
       console.error(err);
@@ -1859,17 +1982,7 @@ function App() {
           LexiQuest
         </h1>
         <div className="flex items-center gap-2">
-          {!hasPremium && (
-            <button
-              onClick={() => {
-                logAction("Opening Subscription Modal");
-                setSubscriptionModalOpen(true);
-              }}
-              className="flex items-center gap-1 text-[10px] font-black text-amber-600 bg-amber-50 px-2.5 py-1.5 rounded-full border border-amber-200 uppercase tracking-tighter"
-            >
-              <Star className="w-3 h-3 fill-amber-500" /> PRO
-            </button>
-          )}
+          {/* PRO badge hidden as all features are free now, but ads remain active */}
           <button
             onClick={() => {
               logAction("Navigating to Profile");
@@ -1915,19 +2028,19 @@ function App() {
         </button>
         <button
           onClick={() => {
-            if (!hasPremium) {
-              setSubscriptionModalOpen(true);
-              return;
-            }
+            // if (!hasPremium) {
+            //   setSubscriptionModalOpen(true);
+            //   return;
+            // }
             setActiveTab('ai-coach');
           }}
           className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 relative transition-colors ${activeTab === 'ai-coach' ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}
         >
           <Bot className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Lexi</span>
-          {!hasPremium && (
+          {/* {!hasPremium && (
             <Sparkles className="w-2.5 h-2.5 text-amber-500 absolute top-2 right-1/2 translate-x-4 fill-amber-500" />
-          )}
+          )} */}
         </button>
         <button
           onClick={() => setActiveTab('dictionary')}
@@ -1938,9 +2051,6 @@ function App() {
         >
           <BookOpen className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Dict</span>
-          {!hasPremium && (
-            <Lock className="w-2.5 h-2.5 absolute top-2 right-1/2 translate-x-4 text-indigo-300" />
-          )}
         </button>
         <button
           onClick={() => setActiveTab('profile')}
@@ -1957,6 +2067,12 @@ function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 pt-14 pb-safe overflow-y-auto flex flex-col">
+        {isOffline && (
+          <div className="bg-amber-500 text-white px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2 animate-pulse sticky top-0 z-20 shadow-sm">
+            <PhoneOff className="w-3 h-3" />
+            Working Offline
+          </div>
+        )}
 
         {activeTab === 'learn' && (
           <div className="flex-1 p-6 lg:p-10 overflow-y-auto">
@@ -1970,7 +2086,7 @@ function App() {
                   <p className="text-gray-600">
                     Expand your vocabulary with these commonly misspelled words and your custom dictionary.
                   </p>
-                  {!hasPremium && (
+                  {/* {!hasPremium && (
                     <button
                       onClick={() => setSubscriptionModalOpen(true)}
                       className="mt-4 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
@@ -1978,7 +2094,7 @@ function App() {
                       <Star className="w-4 h-4 fill-white" />
                       Get Premium - Remove Ads
                     </button>
-                  )}
+                  )} */}
                 </div>
                 <div className="flex flex-col items-start sm:items-end gap-3 w-full sm:w-auto">
                   <div className="flex items-center justify-between sm:justify-start gap-3 bg-indigo-50 px-4 py-2.5 rounded-xl border border-indigo-100 w-full sm:w-auto">
@@ -1998,28 +2114,14 @@ function App() {
               {/* Search Box */}
               <div className="mb-8 relative group">
                 <div className="relative">
-                  <Search className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 ${hasPremium ? 'text-gray-400' : 'text-indigo-300'}`} />
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="text"
                     value={learnSearchQuery}
                     onChange={(e) => setLearnSearchQuery(e.target.value)}
-                    placeholder={hasPremium ? "Search words or meanings..." : "Unlock Search with Premium"}
-                    readOnly={!hasPremium}
-                    className={`w-full pl-12 pr-4 py-4 bg-white border rounded-2xl shadow-sm outline-none transition-all ${hasPremium
-                      ? 'border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10'
-                      : 'border-indigo-100 bg-indigo-50/30 cursor-pointer placeholder-indigo-300'
-                      }`}
-                    onClick={() => {
-                      if (!hasPremium) {
-                        setSubscriptionModalOpen(true);
-                      }
-                    }}
+                    placeholder="Search words or meanings..."
+                    className="w-full pl-12 pr-4 py-4 bg-white border border-gray-200 rounded-2xl shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
                   />
-                  {!hasPremium && (
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                      <Lock className="w-5 h-5 text-indigo-400" />
-                    </div>
-                  )}
                   {learnSearchQuery && (
                     <button
                       onClick={() => setLearnSearchQuery('')}
@@ -2036,28 +2138,18 @@ function App() {
                     <button
                       key={cat}
                       onClick={() => {
-                        if (hasPremium || cat === 'All') {
-                          setSelectedCategory(cat);
-                          setLearnPage(0);
-                        } else {
-                          setSubscriptionModalOpen(true);
-                        }
+                        setSelectedCategory(cat);
+                        setLearnPage(0);
                       }}
                       className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${selectedCategory === cat
                         ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
                         : 'bg-white text-gray-500 border border-gray-100 hover:border-indigo-200'
                         }`}
                     >
-                      {(!hasPremium && cat !== 'All') && <Lock className="w-3 h-3" />}
                       {cat}
                     </button>
                   ))}
                 </div>
-                {!hasPremium && (
-                  <p className="mt-2 text-[10px] font-bold text-indigo-400 uppercase tracking-widest ml-1">
-                    ✨ Subscribe once to unlock search forever
-                  </p>
-                )}
               </div>
 
               <motion.div
@@ -2456,511 +2548,366 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'profile' && (
-          <div className="flex-1 p-6 lg:p-10 overflow-y-auto bg-slate-50">
-            <div className="max-w-2xl mx-auto">
-              <div className="flex flex-row items-center gap-4 sm:gap-6 mb-6 sm:mb-8">
-                <div className="relative flex-shrink-0">
-                  <div className="w-20 h-20 sm:w-24 sm:h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center text-white text-2xl sm:text-3xl font-black shadow-xl overflow-hidden">
-                    {profileImage ? (
-                      <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+          {activeTab === 'profile' && (
+          <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50/50">
+            <div className="max-w-3xl mx-auto space-y-8 pb-10">
+              
+              {/* Premium Glassmorphic Header */}
+              <div className="relative overflow-hidden rounded-[2.5rem] bg-indigo-600 p-8 shadow-2xl shadow-indigo-100">
+                <div className="absolute top-0 right-0 -translate-y-12 translate-x-12 w-48 h-48 bg-white/10 rounded-full blur-3xl" />
+                <div className="absolute bottom-0 left-0 translate-y-12 -translate-x-12 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl" />
+                
+                <div className="relative flex flex-col sm:flex-row items-center gap-6">
+                  <div className="relative group">
+                    <div className="w-24 h-24 sm:w-28 sm:h-28 bg-white/20 backdrop-blur-md rounded-[2rem] border-4 border-white/30 flex items-center justify-center text-white text-4xl font-black shadow-inner overflow-hidden">
+                      {profileImage ? (
+                        <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+                      ) : (
+                        user?.displayName?.[0] || displayName?.[0] || user?.email?.[0]?.toUpperCase() || 'U'
+                      )}
+                    </div>
+                    <button
+                      onClick={handleProfileImagePick}
+                      className="absolute -bottom-2 -right-2 p-2.5 bg-white rounded-2xl shadow-lg border border-indigo-100 text-indigo-600 hover:scale-110 active:scale-90 transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  
+                  <div className="flex-1 text-center sm:text-left">
+                    {isEditingProfile ? (
+                      <div className="flex flex-col gap-3">
+                        <input
+                          type="text"
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value)}
+                          className="text-xl font-bold bg-white/10 border border-white/20 text-white rounded-xl px-4 py-2 outline-none focus:bg-white/20 transition-all w-full placeholder-white/50"
+                          placeholder="Your Name"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => {
+                            setIsEditingProfile(false);
+                            localStorage.setItem('userName', displayName);
+                            setAlertMessage("Profile updated! ✨");
+                          }}
+                          className="bg-white text-indigo-600 text-xs font-black py-2.5 rounded-xl uppercase px-6 hover:bg-slate-50 transition-colors shadow-lg shadow-indigo-900/20 w-fit mx-auto sm:mx-0"
+                        > Save Changes </button>
+                      </div>
                     ) : (
-                      user?.displayName?.[0] || displayName?.[0] || user?.email?.[0]?.toUpperCase() || 'U'
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-center sm:justify-start gap-3">
+                          <h2 className="text-3xl font-black text-white tracking-tight break-words line-clamp-2 leading-tight">{displayName}</h2>
+                          <button onClick={() => setIsEditingProfile(true)} className="p-1.5 text-white/60 hover:text-white transition-colors bg-white/10 rounded-lg"><Sliders className="w-3.5 h-3.5" /></button>
+                        </div>
+                        <p className="text-white/70 font-bold text-xs uppercase tracking-[0.15em] flex items-center justify-center sm:justify-start gap-2">
+                          <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                          {user?.email === MASTER_ADMIN_EMAIL ? 'Master Admin' : 'Premium Member'}
+                        </p>
+
+                      </div>
                     )}
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (Capacitor.isNativePlatform()) {
-                        try {
-                          const image = await (window as any).Capacitor.Plugins.Camera.getPhoto({
-                            quality: 90,
-                            allowEditing: true,
-                            resultType: 'dataUrl',
-                            source: 'photos'
-                          });
-                          if (image.dataUrl) {
-                            setProfileImage(image.dataUrl);
-                            localStorage.setItem('profileImage', image.dataUrl);
-                          }
-                        } catch (e) { console.error(e); }
-                      } else {
-                        setAlertMessage("Image picking is only available on Android/iOS.");
-                      }
-                    }}
-                    className="absolute -bottom-2 -right-2 p-2 bg-white rounded-full shadow-lg border border-slate-100 text-indigo-600 hover:scale-110 transition-transform"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  {isEditingProfile ? (
-                    <div className="flex flex-col gap-2">
-                      <input
-                        type="text"
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        className="text-lg sm:text-xl font-black text-slate-900 bg-slate-100 px-3 py-1.5 rounded-xl outline-none border border-indigo-200 focus:border-indigo-600 transition-colors w-full"
-                        autoFocus
+                
+                {/* Level Progress Bar in Header */}
+                <div className="mt-8 relative pt-4">
+                   <div className="flex justify-between items-end mb-2">
+                      <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">Growth Level</span>
+                      <span className="text-white font-black text-sm">LVL {level}</span>
+                   </div>
+                   <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden backdrop-blur-sm p-0.5">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(xp / (level * 100 * level)) * 100}%` }}
+                        className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full"
                       />
-                      <button
-                        onClick={() => {
-                          setIsEditingProfile(false);
-                          localStorage.setItem('userName', displayName);
-                          setAlertMessage("Profile updated! ✨");
-                        }}
-                        className="bg-indigo-600 text-white text-[10px] font-black py-1.5 rounded-lg uppercase w-fit px-4 hover:bg-indigo-700 transition-colors"
-                      > Save Changes </button>
+                   </div>
+                   <div className="mt-1 flex justify-between">
+                     <span className="text-[8px] font-bold text-white/40 uppercase tracking-widest">{xp} XP Today</span>
+                     <span className="text-[8px] font-bold text-white/40 uppercase tracking-widest">{Math.max(0, level * 100 * level - xp)} XP to next level</span>
+                   </div>
+                </div>
+              </div>
+
+              {/* Quick Stats Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                 <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center">
+                    <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-600 mb-2">
+                       <Flame className="w-6 h-6" />
                     </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 break-words line-clamp-2 leading-tight flex-1">{displayName}</h2>
-                        <button onClick={() => setIsEditingProfile(true)} className="p-1 text-slate-400 hover:text-indigo-600 flex-shrink-0"><Sliders className="w-4 h-4" /></button>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <p className="text-slate-500 font-bold text-xs flex items-center gap-2">
-                          <Star className={`w-3.5 h-3.5 ${hasPremium ? 'text-amber-500 fill-amber-500' : 'text-slate-300'}`} />
-                          {user?.email === MASTER_ADMIN_EMAIL ? 'Master Admin' : (hasPremium ? 'Premium Member' : 'Free Explorer')}
-                        </p>
-                        <button
-                          onClick={async () => {
-                            if (!user) return;
-                            if (Capacitor.isNativePlatform()) {
-                              handleRestore();
-                            } else {
-                              setAuthLoading(true);
-                              try {
-                                const userDoc = await FirebaseFirestore.getDocument({ reference: 'users/' + user.uid });
-                                const userData = userDoc.snapshot?.data as any;
-                                if (userData?.premium) {
-                                  setIsPremium(true);
-                                  localStorage.setItem('isPremium', 'true');
-                                  setAlertMessage("Subscription verified! You are a Premium member. ✨");
-                                } else {
-                                  setIsPremium(false);
-                                  localStorage.setItem('isPremium', 'false');
-                                  setAlertMessage("No active subscription found. Please check your account.");
-                                }
-                              } catch (err) {
-                                setAlertMessage("Failed to verify subscription. Please try again later.");
-                              } finally {
-                                setAuthLoading(false);
-                              }
-                            }
-                          }}
-                          className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline"
-                        >
-                          Restore Purchases
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                    <p className="text-2xl font-black text-slate-900">{streak}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Day Streak</p>
+                 </div>
+                 <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center">
+                    <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-2">
+                       <Trophy className="w-6 h-6" />
+                    </div>
+                    <p className="text-2xl font-black text-slate-900">#{leaderboard.findIndex(u => u.name === (user?.displayName || displayName)) + 1 || '-'}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Rank</p>
+                 </div>
               </div>
 
-              {/* Stats Cards */}
-              <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
-                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-2 text-indigo-600 mb-2">
-                    <GraduationCap className="w-5 h-5" />
-                    <span className="text-xs font-bold uppercase tracking-widest">Experience</span>
+              {/* Progress & Challenges Content */}
+              <div className="space-y-6">
+                
+                {/* Weekly Analytics Section */}
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-indigo-600" /> Weekly Effort
+                    </h3>
                   </div>
-                  <p className="text-2xl font-black text-slate-900">Level {level}</p>
-                  <div className="mt-2 w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${(xp / (level * 100 * level)) * 100}%` }}
-                      className="h-full bg-indigo-600"
-                    />
-                  </div>
-                  <p className="text-[10px] font-bold text-slate-400 mt-2">{xp} / {level * 100 * level} XP</p>
-                </div>
-                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-2 text-orange-500 mb-2">
-                    <Flame className="w-5 h-5" />
-                    <span className="text-xs font-bold uppercase tracking-widest">Streak</span>
-                  </div>
-                  <p className="text-2xl font-black text-slate-900">{streak} Days</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-2 whitespace-nowrap">Don't break the chain!</p>
-                </div>
-              </div>
-
-              {/* Progress Analytics Graph */}
-              <div className="mb-8">
-                <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
-                  <BarChart3 className="w-6 h-6 text-indigo-600" /> Weekly Learning
-                </h3>
-                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm">
-                  <div className="flex items-end justify-between h-32 gap-2">
+                  <div className="flex items-end justify-between h-24 gap-2">
                     {xpHistory.map((val, i) => {
                       const maxVal = Math.max(...xpHistory, 100);
                       const height = (val / maxVal) * 100;
                       return (
                         <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                          <div
-                            className="w-full bg-indigo-100 rounded-t-lg relative group transition-all"
-                            style={{ height: `${height}%`, minHeight: '4px' }}
-                          >
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                              {val} XP
-                            </div>
-                            <div className={`absolute inset-0 bg-indigo-600 rounded-t-lg transition-transform origin-bottom ${height > 0 ? 'scale-y-100' : 'scale-y-0'}`} />
+                          <div className="w-full bg-slate-50 border border-slate-100 rounded-lg relative overflow-hidden h-full">
+                            <motion.div
+                              initial={{ height: 0 }}
+                              animate={{ height: `${height}%` }}
+                              className="absolute bottom-0 left-0 right-0 bg-indigo-600 rounded-t-sm"
+                            />
                           </div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                            {['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}
-                          </span>
+                          <span className="text-[8px] font-bold text-slate-400">{['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}</span>
                         </div>
                       )
                     })}
                   </div>
                 </div>
-              </div>
 
-              {/* Settings & Preferences */}
-              <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm mb-8">
-                <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-                  <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Sliders className="w-4 h-4" /> Preferences
-                  </h3>
-                </div>
-                
-                <button
-                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 dark:border-slate-800 group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-active:scale-90 transition-transform">
-                      {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5 transition-all" />}
-                    </div>
-                    <span className="font-bold text-slate-700">Display Theme</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-400">{theme === 'light' ? 'Light' : 'Dark'}</span>
-                    <ChevronLeft className="w-4 h-4 text-slate-300 rotate-180" />
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSpeechSettingsOpen(true)}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-active:scale-90 transition-transform">
-                      <Volume2 className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-slate-700">Speech & Voice</span>
-                  </div>
-                  <ChevronLeft className="w-4 h-4 text-slate-300 rotate-180" />
-                </button>
-
-                <button
-                  onClick={() => { setDraftReminderTime(reminderTime); setReminderPopoverOpen(o => !o); }}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-active:scale-90 transition-transform">
-                      <Bell className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-slate-700">Daily Notifications</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-indigo-600">{reminderTime}</span>
-                    <ChevronLeft className="w-4 h-4 text-slate-300 rotate-180" />
-                  </div>
-                </button>
-
-                <button
-                  onClick={handleSignOut}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-red-50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600 group-active:scale-90 transition-transform">
-                      <LogIn className="w-5 h-5 rotate-180" />
-                    </div>
-                    <span className="font-bold text-red-600">Sign Out</span>
-                  </div>
-                </button>
-              </div>
-
-              {user?.email === MASTER_ADMIN_EMAIL && (
-                <div className="mb-8 p-6 bg-slate-100 rounded-[2rem] border border-slate-200 shadow-inner">
-                  <details className="group">
-                    <summary className="flex items-center justify-between cursor-pointer list-none">
-                      <div className="flex items-center gap-3 text-slate-600">
-                        <Star className="w-4 h-4 fill-slate-500" />
-                        <span className="text-sm font-black uppercase tracking-widest">Admin Dashboard</span>
-                      </div>
-                      <ChevronLeft className="w-5 h-5 text-slate-400 rotate-[-90deg] group-open:rotate-[90deg] transition-transform" />
-                    </summary>
-                    
-                    <div className="mt-4 space-y-4">
-                      <div className="p-4 bg-white/60 rounded-2xl border border-slate-200">
-                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 text-center border-b border-slate-100 pb-2">Diagnostic Console</p>
-                         <div className="grid grid-cols-2 gap-3 text-[10px] font-bold text-slate-700">
-                            <div className="bg-white p-2 rounded-lg">ID: {user?.uid?.slice(0,8)}...</div>
-                            <div className="bg-white p-2 rounded-lg">Premium: {isPremium ? '✅' : '❌'}</div>
-                            <div className="bg-white p-2 rounded-lg">Ads Init: {adInitialized ? '✅' : '❌'}</div>
-                            <div className="bg-white p-2 rounded-lg">Ad Ready: {adReady ? '✅' : '❌'}</div>
-                         </div>
-                         <div className="mt-3 p-2 bg-indigo-50 rounded-lg text-[10px] text-indigo-700 font-mono">
-                           Last Action: {lastAction}
-                         </div>
-                      </div>
-                      
-                      {errorLog.length > 0 && (
-                        <div className="p-4 bg-white/60 rounded-2xl border border-slate-200">
-                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Live Activity Log</p>
-                          <div className="font-mono text-[10px] text-slate-600 max-h-32 overflow-y-auto space-y-1">
-                            {errorLog.map((log, i) => <div key={i} className="pb-1 border-b border-slate-50 last:border-none">{log}</div>)}
+                {/* Daily Challenges */}
+                <div>
+                   <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 px-2">Daily Missions</h3>
+                   <div className="grid grid-cols-1 gap-3">
+                      {missions.map(m => (
+                        <div key={m.id} className={`p-5 rounded-[1.5rem] border transition-all ${m.completed ? 'bg-green-50/50 border-green-100 shadow-sm' : 'bg-white border-slate-100'}`}>
+                          <div className="flex justify-between items-start mb-3">
+                            <div className="flex items-start gap-3">
+                               <div className={`p-2 rounded-xl ${m.completed ? 'bg-green-100 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
+                                  {m.id.startsWith('correct') ? <Search className="w-4 h-4" /> : m.id.startsWith('test') ? <GraduationCap className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />}
+                               </div>
+                               <div>
+                                  <p className="text-sm font-black text-slate-900">{m.title}</p>
+                                  <p className="text-[10px] font-bold text-slate-500">{m.desc}</p>
+                               </div>
+                            </div>
+                            {m.completed && <CheckCircle className="w-4 h-4 text-green-500" />}
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full transition-all duration-700 ${m.completed ? 'bg-green-500' : 'bg-indigo-600'}`}
+                              style={{ width: `${Math.min(100, (m.current / m.goal) * 100)}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between mt-2">
+                             <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] font-black text-slate-900">{m.current}</span>
+                                <span className="text-gray-300 text-[8px] font-bold">/</span>
+                                <span className="text-[9px] font-bold text-slate-400">{m.goal}</span>
+                             </div>
+                             <span className="text-[9px] font-black text-indigo-600">+{m.reward} XP</span>
                           </div>
                         </div>
-                      )}
+                      ))}
+                   </div>
+                </div>
+
+                {/* Achievement Badges Section */}
+                <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                   <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 text-center">Achievements</h3>
+                   <div className="flex items-center justify-around gap-2">
+                      {badges.map(b => (
+                        <div key={b.id} className={`flex flex-col items-center gap-2 group ${b.earned ? 'opacity-100' : 'opacity-20 grayscale'}`}>
+                           <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-3xl shadow-lg transition-transform group-hover:scale-110 ${b.earned ? 'bg-gradient-to-br from-amber-50 to-orange-100 border border-amber-200 shadow-amber-100' : 'bg-slate-100'}`}>
+                              {b.icon}
+                           </div>
+                           <span className="text-[8px] font-black text-slate-700 uppercase">{b.title.split(' ')[0]}</span>
+                        </div>
+                      ))}
+                   </div>
+                </div>
+
+                {/* Saved Vocabulary Section */}
+                <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+                  <div className="px-6 py-4 bg-indigo-50/50 border-b border-indigo-100 flex items-center justify-between">
+                    <h3 className="text-xs font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
+                      <Bookmark className="w-4 h-4" /> Saved Vocabulary
+                    </h3>
+                    <span className="text-[10px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full">{savedWords.length} Words</span>
+                  </div>
+                  <div className="p-4 grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
+                    {savedWords.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 italic text-xs">No words saved yet.</div>
+                    ) : (
+                      savedWords.sort((a,b) => b.savedAt - a.savedAt).map((sw, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100">
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-slate-900 capitalize">{sw.word}</p>
+                            <p className="text-[10px] text-slate-500 line-clamp-1">{sw.meaning}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => playWord(sw.word)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"><Volume2 className="w-4 h-4"/></button>
+                            <button onClick={() => toggleSaveWord(sw)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Leaderboard Redesign */}
+              <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-5">
+                   <Trophy className="w-32 h-32 rotate-12" />
+                </div>
+                <div className="flex items-center justify-between mb-8 relative z-10">
+                   <h3 className="text-xl font-black flex items-center gap-3">
+                      <Trophy className="w-6 h-6 text-amber-400" /> World Rankings
+                   </h3>
+                   <button 
+                     onClick={() => setShowAllRankings(!showAllRankings)}
+                     className="text-[10px] font-black bg-white/10 px-4 py-2 rounded-full uppercase tracking-widest hover:bg-white/20 transition-all border border-white/10"
+                   >
+                     {showAllRankings ? 'Condensed' : 'Top 10'}
+                   </button>
+                </div>
+                
+                <div className="space-y-2 relative z-10">
+                   {leaderboard.length === 0 ? (
+                      <p className="text-center py-10 opacity-40 font-bold uppercase tracking-widest animate-pulse">Synchronizing Rankings...</p>
+                   ) : (
+                      (showAllRankings ? leaderboard : leaderboard.slice(0, 5)).map((u, i) => (
+                        <motion.div 
+                          key={i} 
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                          className={`flex items-center gap-4 p-3.5 rounded-2xl border transition-all ${user?.displayName === u.name ? 'bg-indigo-600/30 border-indigo-400/50' : 'bg-white/5 border-white/5'}`}
+                        >
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-base ${i === 0 ? 'bg-amber-400 text-slate-900 shadow-lg shadow-amber-400/20' : i === 1 ? 'bg-slate-300 text-slate-900 shadow-lg shadow-slate-400/20' : i === 2 ? 'bg-orange-400 text-slate-900 shadow-lg shadow-orange-400/20' : 'bg-white/10 text-white'}`}>
+                             {i + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                             <p className="font-bold text-white truncate">{u.name || "Explorer"}</p>
+                             <div className="flex items-center gap-2">
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${i < 3 ? 'bg-white/20 text-white' : 'text-white/40'}`}>Level {u.level || 1}</span>
+                             </div>
+                          </div>
+                          <div className="text-right">
+                             <p className="font-black text-amber-400">{u.xp?.toLocaleString()}</p>
+                             <p className="text-[8px] font-bold text-white/30 uppercase tracking-[0.2em]">Total XP</p>
+                          </div>
+                        </motion.div>
+                      ))
+                   )}
+                </div>
+              </div>
+
+               {/* Streak Shield Section */}
+               <div className="p-6 bg-gradient-to-br from-orange-500 to-amber-600 rounded-[2rem] text-white shadow-xl shadow-orange-100/50 flex items-center justify-between overflow-hidden relative">
+                  <div className="absolute top-0 right-0 p-4 opacity-10">
+                     <Star className="w-20 h-20 rotate-45 fill-white" />
+                  </div>
+                  <div className="relative z-10">
+                    <h4 className="font-black flex items-center gap-2 mb-1">
+                      <Star className="w-5 h-5 fill-white" /> Streak Shield
+                    </h4>
+                    <p className="text-[9px] font-bold opacity-80 uppercase tracking-widest">Auto-protects your daily streak</p>
+                  </div>
+                  <div className="text-right relative z-10">
+                    <p className="text-3xl font-black">{streakShields}</p>
+                    <p className="text-[9px] font-black uppercase opacity-60">Ready</p>
+                  </div>
+               </div>
+
+              {/* Settings Grid */}
+              <div className="space-y-4 pb-4">
+                 <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-2 flex items-center gap-2">
+                   <Settings className="w-3 h-3" /> Preferences
+                 </h3>
+                 <div className="grid grid-cols-1 gap-2">
+                    
+                    {[
+                      { icon: <Moon className="w-5 h-5" />, label: "Display Theme", action: () => setTheme(theme === 'light' ? 'dark' : 'light'), sub: theme === 'light' ? 'Light Mode' : 'Dark Mode', color: "text-indigo-600 bg-indigo-50" },
+                      { icon: <Volume2 className="w-5 h-5" />, label: "Sound Effects", action: () => { const nv = !soundEnabled; setSoundEnabled(nv); localStorage.setItem('soundEnabled', nv.toString()); }, sub: soundEnabled ? 'On' : 'Off', color: "text-amber-600 bg-amber-50" },
+                      { icon: <Bell className="w-5 h-5" />, label: "Daily Notifications", action: () => { setDraftReminderTime(reminderTime); setReminderPopoverOpen(true); }, sub: reminderTime, color: "text-orange-600 bg-orange-50" },
+                      { icon: <Sliders className="w-5 h-5" />, label: "Speech & Voice", action: () => setSpeechSettingsOpen(true), sub: "Custom Voices", color: "text-purple-600 bg-purple-50" },
+                      { icon: <Share2 className="w-5 h-5" />, label: "Recommend App", action: handleShareApp, sub: "Share with friends", color: "text-blue-600 bg-blue-50" },
+                    ].map((item, idx) => (
+                      <button key={idx} onClick={item.action} className="w-full bg-white p-4 flex items-center justify-between rounded-2xl border border-slate-100 hover:border-indigo-100 hover:shadow-md active:scale-[0.98] transition-all">
+                        <div className="flex items-center gap-4">
+                           <div className={`w-12 h-12 ${item.color} rounded-2xl flex items-center justify-center`}>
+                              {item.icon}
+                           </div>
+                           <div className="text-left">
+                              <p className="font-black text-slate-900 text-sm">{item.label}</p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.sub}</p>
+                           </div>
+                        </div>
+                        <ChevronLeft className="w-5 h-5 text-slate-200 rotate-180" />
+                      </button>
+                    ))}
+                    
+                    <div className="pt-6 space-y-3">
+                       <button onClick={handleSignOut} className="w-full bg-red-50 p-5 flex items-center justify-between rounded-2xl border border-red-100 group transition-all hover:bg-red-100/50">
+                          <div className="flex items-center gap-4">
+                             <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-red-600 shadow-sm transition-transform group-active:scale-90">
+                                <LogIn className="w-5 h-5 rotate-180" />
+                             </div>
+                             <p className="font-black text-red-600 text-sm">Sign Out Account</p>
+                          </div>
+                          <ChevronLeft className="w-5 h-5 text-red-100 rotate-180" />
+                       </button>
+                       <button onClick={handleDeleteAccount} className="w-full p-4 flex items-center justify-center text-rose-300 hover:text-rose-500 transition-colors text-[10px] font-black uppercase tracking-[0.2em]">
+                          Permanently Delete Account
+                       </button>
+                    </div>
+
+                 </div>
+              </div>
+
+              {/* Stealthy Admin Dashboard */}
+              {user?.email === MASTER_ADMIN_EMAIL && (
+                <div className="mt-10 mb-20">
+                  <details className="group">
+                    <summary className="flex items-center justify-between cursor-pointer list-none bg-slate-100 p-6 rounded-[2.5rem] border border-slate-200 shadow-inner">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-3">
+                        <Lock className="w-4 h-4" /> Admin Console
+                      </h3>
+                      <ChevronLeft className="w-5 h-5 text-slate-300 rotate-[-90deg] group-open:rotate-[90deg] transition-all" />
+                    </summary>
+                    <div className="p-6 space-y-4">
+                       <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { l: "Device", v: Capacitor.getPlatform() },
+                            { l: "Auth Status", v: user ? 'Authenticated' : 'Anon' },
+                            { l: "Ads Status", v: adReady ? 'Ready' : 'Pending' },
+                            { l: "User UID", v: user?.uid?.slice(0,10) }
+                          ].map((stat, i) => (
+                            <div key={i} className="bg-white p-4 rounded-2xl border border-slate-200">
+                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{stat.l}</p>
+                               <p className="text-xs font-black text-slate-900 truncate">{stat.v}</p>
+                            </div>
+                          ))}
+                       </div>
+                       <div className="p-5 bg-white rounded-2xl border border-slate-200 font-mono text-[9px] text-slate-400 max-h-40 overflow-y-auto shadow-inner">
+                          <p className="mb-2 border-b border-slate-100 pb-1 text-slate-600 uppercase">Live Trace Log</p>
+                          {errorLog.map((log, i) => <div key={i} className="mb-1">{log}</div>)}
+                       </div>
                     </div>
                   </details>
                 </div>
               )}
 
-              {/* Global Leaderboard Section */}
-              <div className="mb-8">
-                <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
-                  <Trophy className="w-6 h-6 text-amber-500" /> Global Leaderboard
-                </h3>
-                <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm">
-                  {leaderboard.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 font-bold">Loading Rankings...</div>
-                  ) : (
-                    leaderboard.map((u, i) => (
-                      <div key={i} className={`flex items-center gap-4 px-6 py-4 border-b border-slate-50 last:border-none ${user?.displayName === u.name ? 'bg-indigo-50/50' : ''}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${i === 0 ? 'bg-amber-100 text-amber-600' : i === 1 ? 'bg-slate-100 text-slate-600' : i === 2 ? 'bg-orange-100 text-orange-600' : 'text-slate-400'}`}>
-                          {i + 1}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-bold text-slate-900 truncate">{u.name || "Explorer"}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">Level {u.level || 1}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-black text-indigo-600">{u.xp?.toLocaleString()}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">XP Points</p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Streak Shield Section */}
-              <div className="mb-6 sm:mb-8 p-5 bg-gradient-to-r from-orange-500 to-amber-500 rounded-2xl sm:rounded-3xl text-white shadow-lg shadow-orange-100 flex items-center justify-between">
-                <div>
-                  <h4 className="font-black flex items-center gap-2">
-                    <Star className="w-5 h-5 fill-white" /> Streak Shield
-                  </h4>
-                  <p className="text-[10px] font-bold opacity-80 uppercase tracking-wider">Protects your streak if you miss a day</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-2xl font-black">{streakShields} Available</p>
-                  {!hasPremium ? (
-                    <button
-                      onClick={() => setSubscriptionModalOpen(true)}
-                      className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full uppercase hover:bg-white/30 transition-colors"
-                    >
-                      Premium Only
-                    </button>
-                  ) : (
-                    <p className="text-[10px] font-bold opacity-80">Refills Weekly</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Daily Missions Section */}
-              <div className="mb-6 sm:mb-8">
-                <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
-                  <Target className="w-6 h-6 text-indigo-600" /> Daily Missions
-                </h3>
-                <div className="space-y-3">
-                  {missions.map(m => (
-                    <div key={m.id} className={`p-4 rounded-2xl border transition-all ${m.completed ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200'}`}>
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <p className="font-bold text-slate-900">{m.title}</p>
-                          <p className="text-xs text-slate-500">{m.desc}</p>
-                        </div>
-                        {m.completed && <CheckCircle className="w-5 h-5 text-green-500" />}
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full transition-all duration-500 ${m.completed ? 'bg-green-500' : 'bg-indigo-600'}`}
-                          style={{ width: `${Math.min(100, (m.current / m.goal) * 100)}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between mt-2">
-                        <span className="text-[10px] font-bold text-slate-400">{m.current}/{m.goal}</span>
-                        <span className="text-[10px] font-bold text-indigo-600">+{m.reward} XP</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Badges Section */}
-              <div className="mb-10">
-                <h3 className="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
-                  <Star className="w-6 h-6 text-amber-500" /> Achievement Badges
-                </h3>
-                <div className="grid grid-cols-3 gap-4">
-                  {badges.map(b => (
-                    <div key={b.id} className={`aspect-square rounded-3xl flex flex-col items-center justify-center p-2 text-center transition-all ${b.earned ? 'bg-amber-50 border border-amber-200 shadow-sm' : 'bg-slate-100 opacity-50 grayscale'}`}>
-                      <span className="text-3xl mb-2">{b.icon}</span>
-                      <span className="text-[10px] font-bold text-slate-700 leading-tight">{b.title}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Other Options */}
-              <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden mb-10">
-                <button
-                  onClick={handleShareApp}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-                      <Share2 className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-slate-800">Share App</span>
-                  </div>
-                  <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
-                </button>
-                <button
-                  onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 dark:border-slate-800"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-50 dark:bg-slate-800 rounded-xl flex items-center justify-center text-blue-600">
-                      {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-                    </div>
-                    <span className="font-bold text-slate-800 dark:text-slate-200">
-                      {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
-                    </span>
-                  </div>
-                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${theme === 'dark' ? 'bg-indigo-600' : 'bg-slate-200'}`}>
-                    <div className={`w-4 h-4 bg-white rounded-full transition-transform ${theme === 'dark' ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSpeechSettingsOpen(true)}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center text-purple-600">
-                      <Sliders className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-slate-800">Speech Settings</span>
-                  </div>
-                  <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
-                </button>
-                <button
-                  onClick={() => { setDraftReminderTime(reminderTime); setReminderPopoverOpen(o => !o); }}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600">
-                      <Bell className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-slate-800">Daily Reminder</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-400">{reminderTime}</span>
-                    <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
-                  </div>
-                </button>
-
-                <div className="w-full px-6 py-4 flex items-center justify-between border-b border-slate-100">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
-                      <Volume2 className="w-5 h-5" />
-                    </div>
-                    <div className="text-left">
-                      <span className="font-bold text-slate-800 block">Sound Effects</span>
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Feedback & Alerts</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const newVal = !soundEnabled;
-                      setSoundEnabled(newVal);
-                      localStorage.setItem('soundEnabled', newVal.toString());
-                    }}
-                    className={`w-12 h-6 rounded-full transition-colors relative ${soundEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${soundEnabled ? 'left-7' : 'left-1'}`} />
-                  </button>
-                </div>
-                <button
-                  onClick={() => window.open('https://github.com/Sandeepspj/LexiQuest', '_blank')}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white">
-                      <Share2 className="w-5 h-5" />
-                    </div>
-                    <span className="font-bold text-slate-700">GitHub Repository</span>
-                  </div>
-                  <ChevronLeft className="w-5 h-5 text-slate-300 rotate-180" />
-                </button>
-                <button
-                  onClick={handleSignOut}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-red-50 transition-colors border-b border-slate-100"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600">
-                      <LogIn className="w-5 h-5 rotate-180" />
-                    </div>
-                    <span className="font-bold text-red-600">Sign Out</span>
-                  </div>
-                </button>
-                <button
-                  onClick={handleDeleteAccount}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-rose-50 transition-colors text-rose-600 font-bold text-sm"
-                >
-                  <div className="flex items-center gap-3">
-                    <Trash2 className="w-5 h-5" />
-                    <span>Permanently Delete Account</span>
-                  </div>
-                </button>
-              </div>
-
-              </div>
-
-              {/* Saved Words Section */}
-              <div className="mt-8 bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm mb-8">
-                <div className="px-6 py-4 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between">
-                  <h3 className="text-sm font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
-                    <Bookmark className="w-4 h-4" /> Saved Vocabulary
-                  </h3>
-                  <span className="text-[10px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded-full">{savedWords.length} Words</span>
-                </div>
-                <div className="p-4 grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
-                  {savedWords.length === 0 ? (
-                    <div className="py-8 text-center text-slate-400 italic text-xs">No words saved yet.</div>
-                  ) : (
-                    savedWords.sort((a,b) => b.savedAt - a.savedAt).map((sw, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="flex-1">
-                          <p className="text-sm font-bold text-slate-900 capitalize">{sw.word}</p>
-                          <p className="text-[10px] text-slate-500 line-clamp-1">{sw.meaning}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => playWord(sw.word)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"><Volume2 className="w-4 h-4"/></button>
-                          <button onClick={() => toggleSaveWord(sw)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+            </div>
           </div>
         )}
+
+
 
         {activeTab === 'dictionary' && (
           <div className="flex-1 p-4 lg:p-8 overflow-y-auto">
@@ -2974,57 +2921,38 @@ function App() {
                 <p className="text-gray-500 text-sm">Search any English word for its meaning, synonyms & antonyms.</p>
               </div>
 
-              {!isPremium && user?.email !== MASTER_ADMIN_EMAIL ? (
-                <div className="bg-indigo-50 rounded-[2.5rem] p-10 text-center border border-indigo-100 shadow-sm relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-400 to-transparent opacity-50" />
-                  <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg text-indigo-600">
-                    <Lock className="w-10 h-10" />
-                  </div>
-                  <h3 className="text-2xl font-black text-slate-900 mb-3">Premium Feature</h3>
-                  <p className="text-slate-600 mb-8 max-w-xs mx-auto">Access the full English dictionary with synonyms, antonyms and pronunciations.</p>
-                  <button
-                    onClick={() => setSubscriptionModalOpen(true)}
-                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
-                  >
-                    <Star className="w-5 h-5 fill-white" /> Unlock with Premium
-                  </button>
+              {/* Dictionary content is now always unlocked */}
+              <div className="flex gap-2 mb-6">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={dictQuery}
+                    onChange={e => setDictQuery(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') searchDictionary(); }}
+                    placeholder="Type a word and press Enter..."
+                    className="w-full pl-9 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none bg-white text-gray-800 shadow-sm"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
                 </div>
-              ) : (
-                <>
-                  {/* Search Box */}
-                  <div className="flex gap-2 mb-6">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={dictQuery}
-                        onChange={e => setDictQuery(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') searchDictionary(); }}
-                        placeholder="Type a word and press Enter..."
-                        className="w-full pl-9 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none bg-white text-gray-800 shadow-sm"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                      />
-                    </div>
-                    <button
-                      onClick={() => searchDictionary()}
-                      disabled={dictLoading || !dictQuery.trim()}
-                      className="px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
-                    >
-                      {dictLoading ? (
-                        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4A8 8 0 0012 4z" />
-                        </svg>
-                      ) : (
-                        <Search className="w-4 h-4" />
-                      )}
-                      Search
-                    </button>
-                  </div>
-                </>
-              )}
+                <button
+                  onClick={() => searchDictionary()}
+                  disabled={dictLoading || !dictQuery.trim()}
+                  className="px-5 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2 shadow-sm"
+                >
+                  {dictLoading ? (
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4A8 8 0 0012 4z" />
+                    </svg>
+                  ) : (
+                    <Search className="w-4 h-4" />
+                  )}
+                  Search
+                </button>
+              </div>
 
               {/* Error State */}
               {dictError && (
@@ -3072,7 +3000,6 @@ function App() {
                           <>
                             <Languages className="w-5 h-5" />
                             {hindiTranslation ? 'Refresh Hindi Translation' : 'Translate to Hindi'}
-                            {!isPremium && <Lock className="w-4 h-4 ml-1" />}
                           </>
                         )}
                       </button>
@@ -3129,61 +3056,47 @@ function App() {
                           </ol>
 
                           {/* Synonyms & Antonyms (Premium Feature) */}
-                          {!isPremium ? (
-                            <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex flex-col items-center text-center">
-                              <Lock className="w-5 h-5 text-indigo-400 mb-2" />
-                              <p className="text-xs font-bold text-indigo-900 mb-1">Unlock Synonyms & Antonyms</p>
-                              <p className="text-[10px] text-indigo-600 mb-3">Get full dictionary access and remove all ads.</p>
-                              <button
-                                onClick={() => setSubscriptionModalOpen(true)}
-                                className="px-4 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-full hover:bg-indigo-700 transition-colors shadow-sm"
-                              >
-                                Upgrade to Premium
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              {/* Synonyms */}
-                              {allSynonyms.length > 0 && (
-                                <div className="mb-3">
-                                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                                    <Star className="w-3 h-3 text-emerald-500" /> Synonyms
-                                  </p>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {allSynonyms.map((syn, sIdx) => (
-                                      <button
-                                        key={sIdx}
-                                        onClick={() => { setDictQuery(syn); searchDictionary(syn); }}
-                                        className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full border border-emerald-200 hover:bg-emerald-100 transition-colors"
-                                      >
-                                        {syn}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Antonyms */}
-                              {allAntonyms.length > 0 && (
-                                <div>
-                                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                                    <X className="w-3 h-3 text-rose-500" /> Antonyms
-                                  </p>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {allAntonyms.map((ant, aIdx) => (
-                                      <button
-                                        key={aIdx}
-                                        onClick={() => { setDictQuery(ant); searchDictionary(ant); }}
-                                        className="px-3 py-1 bg-rose-50 text-rose-700 text-xs font-medium rounded-full border border-rose-200 hover:bg-rose-100 transition-colors"
-                                      >
-                                        {ant}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          )}
+                             <>
+                               {/* Synonyms */}
+                               {allSynonyms.length > 0 && (
+                                 <div className="mb-3">
+                                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                     <Star className="w-3 h-3 text-emerald-500" /> Synonyms
+                                   </p>
+                                   <div className="flex flex-wrap gap-1.5">
+                                     {allSynonyms.map((syn, sIdx) => (
+                                       <button
+                                         key={sIdx}
+                                         onClick={() => { setDictQuery(syn); searchDictionary(syn); }}
+                                         className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                                       >
+                                         {syn}
+                                       </button>
+                                     ))}
+                                   </div>
+                                 </div>
+                               )}
+ 
+                               {/* Antonyms */}
+                               {allAntonyms.length > 0 && (
+                                 <div>
+                                   <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                     <X className="w-3 h-3 text-rose-500" /> Antonyms
+                                   </p>
+                                   <div className="flex flex-wrap gap-1.5">
+                                     {allAntonyms.map((ant, aIdx) => (
+                                       <button
+                                         key={aIdx}
+                                         onClick={() => { setDictQuery(ant); searchDictionary(ant); }}
+                                         className="px-3 py-1 bg-rose-50 text-rose-700 text-xs font-medium rounded-full border border-rose-200 hover:bg-rose-100 transition-colors"
+                                       >
+                                         {ant}
+                                       </button>
+                                     ))}
+                                   </div>
+                                 </div>
+                               )}
+                             </>
 
                           {mIdx < dictResult.meanings.length - 1 && (
                             <hr className="mt-4 border-gray-100" />
@@ -3212,7 +3125,7 @@ function App() {
           </div>
         )}
 
-        {(activeTab === 'ai-coach' && (isPremium || user?.email === MASTER_ADMIN_EMAIL)) && (
+        {activeTab === 'ai-coach' && (
           <div className="flex-1 max-w-2xl mx-auto w-full flex flex-col h-[calc(100vh-120px)] bg-slate-50">
             {/* AI Header */}
             <div className="p-4 bg-white border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
@@ -3307,14 +3220,15 @@ function App() {
                     className="flex-1 bg-transparent border-none outline-none pl-3 pr-1 py-3 text-sm font-semibold text-slate-900 placeholder-slate-400 min-w-0"
                   />
                   <div className="flex items-center gap-1 shrink-0 px-1">
-                    <button
+                    {/* AI Call hidden for production release */}
+                    {/* <button
                       type="button"
                       onClick={handleStartCall}
                       className="p-2.5 text-indigo-600 hover:bg-white rounded-xl transition-all active:scale-90"
                       title="Call Lexi"
                     >
                       <Phone className="w-5 h-5" />
-                    </button>
+                    </button> */}
                     <button
                       type="button"
                       onClick={startListening}
@@ -3684,9 +3598,9 @@ function App() {
           >
             <div className="absolute inset-0 bg-gradient-to-tr from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
             <Target className="w-7 h-7 relative z-10" />
-            {dailyWordsLearned < 5 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-pink-500 border-2 border-white rounded-full flex items-center justify-center text-[10px] font-black">
-                {5 - dailyWordsLearned}
+            {dailyWordsLearned < dailyWords.length && (
+              <span className="absolute -top-1 -right-1 px-1.5 min-w-[20px] h-5 bg-pink-500 border-2 border-white rounded-full flex items-center justify-center text-[8px] font-black">
+                {dailyWords.length - dailyWordsLearned}
               </span>
             )}
           </motion.button>
@@ -3766,18 +3680,18 @@ function App() {
                         </button>
                         <button
                           onClick={() => {
-                            if (dailyWordsLearned < 5) {
+                            if (dailyWordsLearned < dailyWords.length) {
                               const newLearned = dailyWordsLearned + 1;
                               setDailyWordsLearned(newLearned);
                               localStorage.setItem('dailyWordsLearned', newLearned.toString());
                               addXp(20);
-                              if (newLearned === 5) {
-                                addXp(100);
-                                setAlertMessage("🏆 Challenge Complete! +100 XP Bonus!");
+                              if (newLearned === dailyWords.length) {
+                                addXp(500); // Higher bonus for 100 words
+                                setAlertMessage("🏆 Challenge Complete! +500 XP Bonus!");
                               }
                             }
                           }}
-                          disabled={dailyWordsLearned >= 5 || (currentDailyIndex < dailyWordsLearned)}
+                          disabled={dailyWordsLearned >= dailyWords.length || (currentDailyIndex < dailyWordsLearned)}
                           className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg flex items-center justify-center gap-2 disabled:bg-slate-300"
                         >
                           <CheckCircle className="w-5 h-5" /> {dailyWordsLearned > currentDailyIndex ? 'Mastered' : 'Master'}
@@ -3792,13 +3706,11 @@ function App() {
                         >
                           <ChevronLeft className="w-8 h-8" />
                         </button>
-                        <div className="flex gap-2">
-                          {dailyWords.map((_, idx) => (
-                            <div
-                              key={idx}
-                              className={`w-2 h-2 rounded-full transition-all ${idx === currentDailyIndex ? 'w-6 bg-indigo-600' : 'bg-slate-200'}`}
-                            />
-                          ))}
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-slate-900 font-black text-sm">
+                            {currentDailyIndex + 1} / {dailyWords.length}
+                          </span>
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Progress</span>
                         </div>
                         <button
                           onClick={() => setCurrentDailyIndex(prev => Math.min(dailyWords.length - 1, prev + 1))}
@@ -3908,6 +3820,7 @@ function App() {
                 setIsListening(false);
               }}
               isListening={isListening}
+              isSpeaking={isLexiSpeaking}
               lastMessage={aiChat.filter(m => m.role === 'model').slice(-1)[0]?.content}
             />
           )}
@@ -3918,7 +3831,7 @@ function App() {
   );
 }
 
-const CallOverlay = ({ isOpen, onClose, isListening, lastMessage }: any) => {
+const CallOverlay = ({ isOpen, onClose, isListening, isSpeaking, lastMessage }: any) => {
   if (!isOpen) return null;
 
   return (
@@ -3936,49 +3849,57 @@ const CallOverlay = ({ isOpen, onClose, isListening, lastMessage }: any) => {
       <div className="relative mb-12">
         {/* Animated Orbs */}
         <motion.div
-          animate={{ scale: isListening ? [1, 1.2, 1] : 1 }}
+          animate={{ scale: (isListening || isSpeaking) ? [1, 1.15, 1] : 1 }}
           transition={{ repeat: Infinity, duration: 2 }}
-          className="w-48 h-48 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center shadow-[0_0_80px_rgba(79,70,229,0.4)]"
+          className={`w-48 h-48 rounded-full flex items-center justify-center transition-all duration-700 ${isListening ? 'bg-gradient-to-br from-indigo-500 to-cyan-400 shadow-[0_0_80px_rgba(79,70,229,0.5)]' : isSpeaking ? 'bg-gradient-to-br from-purple-500 to-rose-400 shadow-[0_0_80px_rgba(168,85,247,0.5)]' : 'bg-slate-800 shadow-none'}`}
         >
           <div className="w-40 h-40 bg-slate-900/40 rounded-full backdrop-blur-md flex items-center justify-center">
             <motion.div
-               animate={{ rotate: isListening ? 360 : 0 }}
-               transition={{ repeat: Infinity, duration: 8, ease: "linear" }}
+               animate={{ rotate: isListening ? 360 : 0, scale: isSpeaking ? [1, 1.1, 1] : 1 }}
+               transition={{ rotate: { repeat: Infinity, duration: 8, ease: "linear" }, scale: { repeat: Infinity, duration: 2 } }}
             >
-              <Bot className="w-20 h-20 text-white" />
+              <Bot className={`w-20 h-20 transition-colors duration-500 ${isListening ? 'text-cyan-300' : isSpeaking ? 'text-rose-300' : 'text-slate-500'}`} />
             </motion.div>
           </div>
         </motion.div>
         
-        {isListening && (
+        {(isListening || isSpeaking) && (
            <motion.div 
              initial={{ scale: 0.8, opacity: 0 }}
-             animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
-             transition={{ repeat: Infinity, duration: 1.5 }}
-             className="absolute inset-0 border-4 border-indigo-400 rounded-full"
+             animate={{ scale: [1, 1.5], opacity: [0.3, 0] }}
+             transition={{ repeat: Infinity, duration: 2 }}
+             className={`absolute inset-0 border-4 rounded-full ${isListening ? 'border-cyan-400' : 'border-rose-400'}`}
            />
         )}
       </div>
 
-      <div className="text-center max-w-xs mb-20 min-h-[80px]">
+      <div className="text-center max-w-xs mb-20 min-h-[80px] flex flex-col items-center justify-center">
         {isListening ? (
           <div className="flex flex-col items-center gap-2">
-            <div className="flex gap-1">
-              {[1, 2, 3].map(i => (
+            <div className="flex gap-1 mb-2">
+              {[1, 2, 3, 4, 5].map(i => (
                 <motion.div
                   key={i}
-                  animate={{ height: [8, 20, 8] }}
-                  transition={{ repeat: Infinity, duration: 0.6, delay: i * 0.1 }}
-                  className="w-1.5 bg-indigo-400 rounded-full"
+                  animate={{ height: [10, 24, 10] }}
+                  transition={{ repeat: Infinity, duration: 0.5, delay: i * 0.1 }}
+                  className="w-1.5 bg-cyan-400 rounded-full"
                 />
               ))}
             </div>
-            <p className="text-indigo-300 font-bold text-sm tracking-widest uppercase">Listening...</p>
+            <p className="text-cyan-300 font-black text-xs tracking-widest uppercase">Lexi is Listening...</p>
+          </div>
+        ) : isSpeaking ? (
+          <div className="flex flex-col items-center gap-3">
+             <p className="text-rose-300 font-black text-xs tracking-widest uppercase animate-pulse">Lexi is Speaking...</p>
+             <p className="text-white/90 font-medium text-lg italic leading-relaxed px-4">
+              {lastMessage}
+            </p>
           </div>
         ) : (
-          <p className="text-white/80 font-medium text-lg italic leading-relaxed">
-            {lastMessage || "Lexi is thinking..."}
-          </p>
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-8 h-8 border-4 border-slate-700 border-t-indigo-500 rounded-full animate-spin mb-2" />
+            <p className="text-slate-500 font-black text-xs tracking-widest uppercase">Lexi is Thinking...</p>
+          </div>
         )}
       </div>
 

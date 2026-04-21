@@ -13,7 +13,7 @@ const config: CapacitorConfig = {
     },
     FirebaseAuthentication: {
       skipNativeAuth: false,
-      providers: ['google.com', 'phone'],
+      providers: ['google.com'],
     },
     GoogleAuth: {
       scopes: ['profile', 'email'],
