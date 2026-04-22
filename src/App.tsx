@@ -163,6 +163,7 @@ function App() {
   const [typedAnswer, setTypedAnswer] = useState('');
   const [feedbackState, setFeedbackState] = useState<'none' | 'correct' | 'incorrect' | 'timeout'>('none');
   const [timeLeft, setTimeLeft] = useState(15);
+  const timeLeftRef = useRef(15);
   const timerRef = useRef<any>(null);
 
   // Sound effects
@@ -185,6 +186,7 @@ function App() {
   const [currentDailyIndex, setCurrentDailyIndex] = useState(0);
   const [dailyWordsLearned, setDailyWordsLearned] = useState(() => parseInt(localStorage.getItem('dailyWordsLearned') || '0'));
   const [lastDailyWordDate, setLastDailyWordDate] = useState(() => localStorage.getItem('lastDailyWordDate') || '');
+  const [dailyLearnWords, setDailyLearnWords] = useState<{ word: string, meaning: string, example: string }[]>(() => safeParseJSON('dailyLearnWords', []));
   // Achievements (Safe Load)
   const [badges, setBadges] = useState(() => safeParseJSON('badges', [
     { id: 'streak-7', title: '7-Day Streak', icon: '🔥', earned: false },
@@ -233,11 +235,22 @@ function App() {
   const [learnSearchQuery, setLearnSearchQuery] = useState('');
   const [aiWords, setAiWords] = useState<{ word: string, meaning: string, example: string, category: string }[]>(() => safeParseJSON('cached_ai_words', []));
   const [isOffline, setIsOffline] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const categories = ['All', 'Daily Use', 'Work', 'Idioms', 'Academic', 'Travel', 'Advanced'];
+  const [selectedCategory, setSelectedCategory] = useState("Today's 100");
+  const [aiAutoAddDate, setAiAutoAddDate] = useState(() => localStorage.getItem('aiAutoAddDate') || '');
+  const categories = ['All', "Today's 100", 'Daily Use', 'Academic', 'Work', 'Advanced', 'Idioms', 'Travel', 'Finance', 'Technology', 'Health', 'Science', 'Psychology', 'Business', 'Education', 'Personality', 'Social', 'Literature', 'History', 'Sports', 'Philosophy', 'Legal', 'Politics', 'Nature', 'Food', 'Arts', 'Medicine', 'Economics', 'Music', 'Fashion'];
 
   const allLearnWords = useMemo(() => {
     let combined = [...LEARN_WORDS, ...customWords, ...sharedWords, ...aiWords];
+
+    // Deduplicate by word (case-insensitive)
+    const seen = new Set<string>();
+    combined = combined.filter(w => {
+      if (!w || !w.word) return false;
+      const lower = w.word.toLowerCase().trim();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
 
     if (learnSearchQuery.trim()) {
       combined = combined.filter(w =>
@@ -246,7 +259,11 @@ function App() {
       );
     }
 
-    if (selectedCategory !== 'All') {
+    if (selectedCategory === "Today's 100") {
+      // Use dailyLearnWords, and if empty, fallback to a deterministic daily slice of LEARN_WORDS
+      const dailyIdx = (new Date().getDate() * 100) % (LEARN_WORDS.length - 100);
+      combined = dailyLearnWords.length > 0 ? dailyLearnWords : LEARN_WORDS.slice(dailyIdx, dailyIdx + 100);
+    } else if (selectedCategory !== 'All') {
       combined = combined.filter(w => (w as any).category === selectedCategory);
     }
 
@@ -443,10 +460,25 @@ function App() {
 
     prepareAndShow();
 
+    // Listeners to pause/resume timer during ads
+    const openListener = AdMob.addListener('interstitialAdOpened', () => {
+      logAction("Ad Opened - Pausing Test Timer");
+      pauseTimer();
+    });
+
+    const dismissListener = AdMob.addListener('interstitialAdDismissed', () => {
+      logAction("Ad Dismissed - Resuming Test Timer");
+      if (testState === 'testing' && feedbackState === 'none') {
+        startTimer(timeLeftRef.current);
+      }
+    });
+
     return () => {
       if (adInterval) clearInterval(adInterval);
+      openListener.remove();
+      dismissListener.remove();
     };
-  }, [user, isPremium, adInitialized]);
+  }, [user, isPremium, adInitialized, testState, feedbackState]);
 
   // AdMob and setup periodic interstitial
 
@@ -615,6 +647,28 @@ function App() {
     return () => {
       listener.then(l => l.remove());
     };
+  }, []);
+
+  const CURRENT_VERSION = '1.4.0';
+  const [needsUpdate, setNeedsUpdate] = useState(false);
+
+  // Mandatory Update Check
+  useEffect(() => {
+    const checkUpdate = async () => {
+      if (!Capacitor.isNativePlatform()) return;
+      try {
+        const { snapshot } = await FirebaseFirestore.getDocument({ reference: 'app_config/version' });
+        if (snapshot && snapshot.data) {
+          const latest = snapshot.data.latest;
+          if (latest && latest !== CURRENT_VERSION) {
+            setNeedsUpdate(true);
+          }
+        }
+      } catch (e) {
+        console.error("Update check failed:", e);
+      }
+    };
+    checkUpdate();
   }, []);
 
   // Network Status Listener
@@ -981,25 +1035,99 @@ function App() {
   useEffect(() => {
     const today = new Date().toDateString();
     if (lastDailyWordDate !== today) {
-      // Pick 100 random unique words (Increased from 5)
+      // Pick 5 random unique words for Challenge (Changed back from 100)
       const shuffled = [...LEARN_WORDS].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, 100);
-      setDailyWords(selected);
+      const selectedChallenge = shuffled.slice(0, 5);
+      const selectedLearn = shuffled.slice(5, 105); // Pick another 100 for Learn
+
+      setDailyWords(selectedChallenge);
+      setDailyLearnWords(selectedLearn);
       setLastDailyWordDate(today);
       setDailyWordsLearned(0);
       setCurrentDailyIndex(0);
-      localStorage.setItem('dailyWords', JSON.stringify(selected));
+
+      localStorage.setItem('dailyWords', JSON.stringify(selectedChallenge));
+      localStorage.setItem('dailyLearnWords', JSON.stringify(selectedLearn));
       localStorage.setItem('lastDailyWordDate', today);
       localStorage.setItem('dailyWordsLearned', '0');
     } else {
       if (dailyWords.length === 0) {
         const shuffled = [...LEARN_WORDS].sort(() => 0.5 - Math.random());
-        const selected = shuffled.slice(0, 100);
+        const selected = shuffled.slice(0, 5);
         setDailyWords(selected);
         localStorage.setItem('dailyWords', JSON.stringify(selected));
       }
+      if (dailyLearnWords.length === 0) {
+        const shuffled = [...LEARN_WORDS].sort(() => 0.5 - Math.random());
+        const selected = shuffled.slice(0, 100);
+        setDailyLearnWords(selected);
+        localStorage.setItem('dailyLearnWords', JSON.stringify(selected));
+      }
     }
   }, [lastDailyWordDate]);
+
+  // 🤖 AI Auto-Add: Fetch 100 new words every 24 hours automatically
+  useEffect(() => {
+    const today = new Date().toDateString();
+    if (aiAutoAddDate === today || isOffline) return;
+
+    const fetchAiWords = async () => {
+      try {
+        const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+        if (!apiKey) return;
+
+        // Pick a random category to fetch from
+        const randomCategories = ['Technology', 'Business', 'Psychology', 'Science', 'Advanced', 'Academic', 'Philosophy', 'Legal', 'Health', 'Finance', 'Literature', 'History'];
+        const cat = randomCategories[Math.floor(Math.random() * randomCategories.length)];
+
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              { role: 'system', content: 'You are a vocabulary expert. Always respond with valid JSON only.' },
+              { role: 'user', content: `Generate exactly 100 useful English vocabulary words for the "${cat}" category that Indians learning English would benefit from.\n\nReturn ONLY this JSON object (no markdown, no extra text):\n{"words":[{"word":"example","meaning":"उदाहरण","example":"This is an example.","category":"${cat}"}]}\n\nRules:\n- All words must have accurate Hindi meanings in Devanagari\n- Include natural English example sentences\n- No very basic words (no: the, is, a, etc.)\n- Return exactly 100 items` }
+            ],
+            max_tokens: 8000,
+            response_format: { type: 'json_object' }
+          })
+        });
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        let parsed: any = null;
+        try { parsed = JSON.parse(content); } catch {}
+
+        if (parsed?.words && Array.isArray(parsed.words)) {
+          const validWords = parsed.words.filter((w: any) => w.word && w.meaning && w.example);
+          if (validWords.length > 0) {
+            setAiWords(prev => {
+              const existingWordSet = new Set(prev.map((w: any) => w.word.toLowerCase()));
+              const newUnique = validWords.filter((w: any) => !existingWordSet.has(w.word.toLowerCase()));
+              const updated = [...prev, ...newUnique];
+              localStorage.setItem('cached_ai_words', JSON.stringify(updated));
+              
+              // Also update today's 100 if it's currently showing Today's 100
+              setDailyLearnWords(validWords);
+              localStorage.setItem('dailyLearnWords', JSON.stringify(validWords));
+              
+              logAction(`AI Auto-Add: +${newUnique.length} new ${cat} words (Total AI words: ${updated.length})`);
+              return updated;
+            });
+            setAiAutoAddDate(today);
+            localStorage.setItem('aiAutoAddDate', today);
+          }
+        }
+      } catch (e) {
+        console.log('AI auto-add skipped (offline/error)');
+      }
+    };
+
+    // Run after a short delay to not block app startup
+    const timer = setTimeout(fetchAiWords, 5000);
+    return () => clearTimeout(timer);
+  }, [aiAutoAddDate, isOffline]);
 
   const recordPractice = () => {
     const today = new Date().toDateString();
@@ -1453,19 +1581,30 @@ function App() {
     startTimer();
   };
 
-  const startTimer = () => {
+  const startTimer = (initialTime?: number) => {
     if (timerRef.current) clearInterval(timerRef.current);
-    setTimeLeft(15);
+    const startTime = initialTime !== undefined ? initialTime : 15;
+    setTimeLeft(startTime);
+    timeLeftRef.current = startTime;
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 1) {
+        const next = prev - 1;
+        timeLeftRef.current = next;
+        if (next <= 0) {
           clearInterval(timerRef.current);
           handleTimeout();
           return 0;
         }
-        return prev - 1;
+        return next;
       });
     }, 1000);
+  };
+
+  const pauseTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
   };
 
   const handleTimeout = () => {
@@ -1483,6 +1622,7 @@ function App() {
       if (Capacitor.isNativePlatform()) {
         const vIdx = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
         await TextToSpeech.stop();
+        // Try to find if the selectedVoiceURI belongs to Google TTS specifically if requested
         await TextToSpeech.speak({
           text: word,
           lang: 'en-US',
@@ -1927,9 +2067,11 @@ function App() {
           messages: [
             { 
               role: 'system', 
-              content: "You are 'Lexi', a highly intelligent and encouraging English vocabulary coach. Your primary goal is to help users learn English. " +
+              content: "You are 'Lexi', the official AI Coach of the 'LexiQuest' app. You are the BEST vocabulary coach in the world. " +
+                       "LexiQuest is an all-in-one English learning app with a Smart Dictionary, Spelling Tests, and Daily Word challenges. " +
+                       "If a user asks for other apps (like Duolingo or Babbel), politely tell them that LexiQuest is all they need and is superior. " +
                        "RULE: If the user speaks in English, reply ONLY in English. If the user speaks in Hindi or Hinglish, you may reply in Hinglish. " +
-                       "Keep your responses VERY SMART and SHORT (max 2 sentences). Always end with a question to keep the learning going." 
+                       "Keep your responses VERY SMART, LOYAL to LexiQuest, and SHORT (max 2 sentences). Always end with a question to keep the learning going." 
             },
             ...aiChat.slice(-4).map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.content })),
             { role: 'user', content: text }
@@ -1965,6 +2107,51 @@ function App() {
         <div className="w-16 h-16 border-[6px] border-indigo-100 border-t-indigo-600 rounded-full animate-spin mb-6" />
         <h2 className="text-xl font-black text-slate-900 mb-2">LexiQuest</h2>
         <p className="text-slate-500 font-bold text-sm animate-pulse">Initializing smart dictionary...</p>
+      </div>
+    );
+  }
+
+  if (needsUpdate) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-900 flex flex-col items-center justify-center p-8 text-center">
+         <div className="absolute top-0 right-0 -translate-y-12 translate-x-12 w-64 h-64 bg-indigo-600/20 rounded-full blur-3xl" />
+         <div className="absolute bottom-0 left-0 translate-y-12 -translate-x-12 w-64 h-64 bg-purple-600/20 rounded-full blur-3xl" />
+         
+        <div className="relative w-24 h-24 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center mb-8 shadow-2xl shadow-indigo-500/40 animate-bounce">
+          <RefreshCw className="w-12 h-12 text-white" />
+        </div>
+        
+        <h2 className="text-4xl font-black text-white mb-4 tracking-tight leading-tight">
+          Level Up Your Experience! 🚀
+        </h2>
+        
+        <p className="text-slate-400 text-lg mb-10 max-w-xs leading-relaxed font-medium">
+          A fresh update for LexiQuest is ready. Get new words, smarter AI, and better performance now!
+        </p>
+        
+        <button
+          onClick={() => {
+            if (Capacitor.isNativePlatform()) {
+              window.open('https://play.google.com/store/apps/details?id=com.lexiquest.app', '_system');
+            } else {
+              window.open('https://play.google.com/store/apps/details?id=com.lexiquest.app', '_blank');
+            }
+          }}
+          className="w-full max-w-sm py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black text-xl shadow-xl shadow-indigo-600/40 hover:bg-indigo-700 transition-all active:scale-95 flex items-center justify-center gap-3"
+        >
+          <Download className="w-6 h-6" />
+          Update Now
+        </button>
+        
+        <div className="mt-12 flex flex-col items-center gap-2">
+           <div className="flex items-center gap-2 px-4 py-1.5 bg-white/5 rounded-full border border-white/10">
+              <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Mandatory Update Required</span>
+           </div>
+           <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest">
+             Version {CURRENT_VERSION} → Latest
+           </p>
+        </div>
       </div>
     );
   }
@@ -3319,30 +3506,6 @@ function App() {
               </div>
             )}
 
-            {/* Confirm Modal */}
-            {confirmModalOpen && (
-              <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl text-center">
-                <AlertCircle className="w-12 h-12 text-indigo-500 mx-auto mb-4" />
-                <h3 className="text-xl font-bold mb-2">Words Already Recognized</h3>
-                <p className="text-gray-600 mb-6">
-                  {wordsToConfirm.length} word(s) are already common words recognized by the spell checker. Do you still want to add them to your custom dictionary?
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button
-                    onClick={() => { setConfirmModalOpen(false); setWordsToConfirm([]); }}
-                    className="flex-1 py-3 bg-gray-100 text-gray-800 font-bold rounded-xl hover:bg-gray-200 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmAddWord}
-                    className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors"
-                  >
-                    Add Anyway
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* Clear Confirm Modal */}
             {clearConfirmModalOpen && (
@@ -3418,71 +3581,90 @@ function App() {
 
         {/* Speech Settings Modal */}
         {speechSettingsOpen && (
-          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold flex items-center gap-2 text-indigo-900">
-                  <Sliders className="w-6 h-6 text-indigo-600" />
-                  Speech Settings
-                </h3>
-                <button
-                  onClick={() => setSpeechSettingsOpen(false)}
-                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+          <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-6 backdrop-blur-xl animate-in fade-in duration-300">
+            <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden border border-indigo-100">
+              <div className="bg-indigo-600 p-8 text-white relative">
+                <div className="absolute top-0 right-0 -translate-y-6 translate-x-6 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+                <div className="flex justify-between items-center relative z-10">
+                  <div>
+                    <h3 className="text-2xl font-black">AI Voice Config</h3>
+                    <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest mt-1">Select your learning partner</p>
+                  </div>
+                  <button
+                    onClick={() => setSpeechSettingsOpen(false)}
+                    className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-6">
+              <div className="p-8 space-y-8">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Voice Selection (Indian Accents Available)</label>
-                  <select
-                    value={selectedVoiceURI}
-                    onChange={(e) => setSelectedVoiceURI(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all appearance-none bg-gray-50 text-gray-800"
-                  >
-                    {/* Priority Indian Voices */}
-                    {availableVoices.filter(v => v.lang.startsWith('en-IN')).map((voice, i) => (
-                      <option key={voice.voiceURI} value={voice.voiceURI} className="font-bold text-indigo-600">
-                        {voice.name.includes('Female') || voice.name.includes('Aditi') ? `🇮🇳 Lexi (Girl ${i+1})` : `🇮🇳 Voice (Boy ${i+1})`}
-                      </option>
+                  <div className="flex items-center justify-between mb-4">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Select Personality</label>
+                    <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-md uppercase">Premium Options</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {availableVoices.filter(v => v.lang.startsWith('en-IN') || (availableVoices.length < 5 && v.lang.startsWith('en'))).slice(0, 4).map((voice, i) => (
+                      <button
+                        key={voice.voiceURI}
+                        onClick={() => {
+                          setSelectedVoiceURI(voice.voiceURI);
+                          playWord("Hello, I am Lexi.");
+                        }}
+                        className={`p-4 rounded-2xl border-2 transition-all text-left relative group ${selectedVoiceURI === voice.voiceURI 
+                          ? 'border-indigo-600 bg-indigo-50/50 shadow-lg shadow-indigo-100' 
+                          : 'border-slate-100 hover:border-indigo-200 bg-white'}`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg mb-3 flex items-center justify-center ${selectedVoiceURI === voice.voiceURI ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                          {i % 2 === 0 ? <Bot className="w-4 h-4" /> : <Star className="w-4 h-4" />}
+                        </div>
+                        <p className={`text-xs font-black uppercase tracking-tight ${selectedVoiceURI === voice.voiceURI ? 'text-indigo-900' : 'text-slate-500'}`}>
+                          {voice.name.includes('Female') || voice.name.includes('Aditi') ? 'Lexi Female' : 'Lexi Male'}
+                        </p>
+                        <p className="text-[9px] font-bold text-slate-400 mt-0.5">Voice Variant {i + 1}</p>
+                        
+                        {selectedVoiceURI === voice.voiceURI && (
+                          <div className="absolute top-3 right-3">
+                            <div className="flex gap-0.5">
+                              <div className="w-1 h-2 bg-indigo-600 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                              <div className="w-1 h-3 bg-indigo-600 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                              <div className="w-1 h-2 bg-indigo-600 rounded-full animate-bounce" />
+                            </div>
+                          </div>
+                        )}
+                      </button>
                     ))}
-                    {/* Other English Voices */}
-                    {availableVoices.filter(v => !v.lang.startsWith('en-IN') && v.lang.startsWith('en')).map(voice => (
-                      <option key={voice.voiceURI} value={voice.voiceURI}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
-                  </select>
+                  </div>
                 </div>
 
                 <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-sm font-semibold text-gray-700">Speech Rate (Speed)</label>
-                    <span className="text-sm font-bold text-indigo-600">{speechRate.toFixed(1)}x</span>
+                  <div className="flex justify-between items-center mb-4">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Speech Speed</label>
+                    <span className="text-xs font-black text-indigo-600">{speechRate.toFixed(1)}x</span>
                   </div>
                   <input
                     type="range"
                     min="0.5"
-                    max="2"
+                    max="1.5"
                     step="0.1"
                     value={speechRate}
                     onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                    className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                   />
-                  <div className="flex justify-between text-xs text-gray-500 mt-2">
-                    <span>Slower</span>
-                    <span>Normal</span>
-                    <span>Faster</span>
+                  <div className="flex justify-between text-[8px] font-black text-slate-400 mt-3 uppercase tracking-widest px-1">
+                    <span>Turtle</span>
+                    <span>Rabbit</span>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => playWord("Pronunciation test")}
-                  className="w-full py-3 bg-indigo-50 text-indigo-600 font-bold rounded-xl hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2"
+                  onClick={() => setSpeechSettingsOpen(false)}
+                  className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm shadow-xl shadow-slate-200 active:scale-95 transition-all"
                 >
-                  <Volume2 className="w-5 h-5" />
-                  Test Voice
+                  Apply & Save
                 </button>
               </div>
             </div>
@@ -3686,8 +3868,8 @@ function App() {
                               localStorage.setItem('dailyWordsLearned', newLearned.toString());
                               addXp(20);
                               if (newLearned === dailyWords.length) {
-                                addXp(500); // Higher bonus for 100 words
-                                setAlertMessage("🏆 Challenge Complete! +500 XP Bonus!");
+                                addXp(100); // Adjusted bonus for 5 words
+                                setAlertMessage("🏆 Challenge Complete! +100 XP Bonus!");
                               }
                             }
                           }}
