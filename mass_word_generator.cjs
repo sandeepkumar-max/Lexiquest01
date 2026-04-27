@@ -67,21 +67,21 @@ async function main() {
     }
 
     console.log(`Current word count: ${existingWords.size}`);
-    
-    const target = 6100;
-    const categories = ['Technology', 'Finance', 'Medicine', 'Psychology', 'Science', 'Law', 'Literature', 'Daily Use', 'Idioms', 'Phrasal Verbs', 'Business', 'Art', 'Nature', 'Travel', 'Food', 'Sports', 'Education', 'History', 'Philosophy', 'Space'];
-    
+
+    const target = 10000;
+    const categories = ['Technology', 'Finance', 'Medicine', 'Psychology', 'Science', 'Law', 'Literature', 'Daily Use', 'Idioms', 'Phrasal Verbs', 'Business', 'Art', 'Nature', 'Travel', 'Food', 'Sports', 'Education', 'History', 'Philosophy', 'Space', 'Environment', 'Sociology', 'Architecture', 'Music', 'Fashion', 'Health', 'Economics', 'Politics', 'Legal', 'Ethics', 'Modern Slang', 'Academic'];
+
     let totalAdded = 0;
     while (existingWords.size < target) {
         const category = categories[Math.floor(Math.random() * categories.length)];
-        const batchSize = 20;
+        const batchSize = 30;
         console.log(`Fetching ${batchSize} words for ${category}...`);
-        
+
         try {
             const words = await getGroqWords(batchSize, category, existingWords);
             let addedInBatch = 0;
             let batchContent = '';
-            
+
             for (const w of words) {
                 const wordLower = w.word.toLowerCase().trim();
                 if (!existingWords.has(wordLower)) {
@@ -91,7 +91,7 @@ async function main() {
                     totalAdded++;
                 }
             }
-            
+
             if (addedInBatch > 0) {
                 const lastBracketIndex = content.lastIndexOf('];');
                 content = content.slice(0, lastBracketIndex) + batchContent + '\n];\n';
@@ -105,7 +105,7 @@ async function main() {
             await new Promise(r => setTimeout(r, 30000)); // Wait before retry
         }
     }
-    
+
     console.log(`Finished! Total added: ${totalAdded}. Final count: ${existingWords.size}`);
 }
 

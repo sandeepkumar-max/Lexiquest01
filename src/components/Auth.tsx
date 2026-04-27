@@ -79,6 +79,8 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
       console.error('Google Sign-In error:', err);
       if (err.message?.includes('12500')) {
         setError('Google Login Error: SHA-1 keys for this environment may be missing in Firebase.');
+      } else if (err.message?.includes('No credentials available')) {
+        setError('No Google account found on this device. Please sign in to Google in your phone settings.');
       } else {
         setError(err.message || 'Google Sign-In failed.');
       }
@@ -104,7 +106,7 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center p-6 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center p-6 font-sans pt-safe pb-safe">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -130,8 +132,28 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
+              {/* Social Login (Moved to Top for better UX) */}
+              <div className="mt-6">
+                <button
+                  onClick={handleGoogleSignIn}
+                  disabled={loading}
+                  className="w-full flex items-center justify-center gap-3 py-4 bg-slate-950 border border-slate-800 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-indigo-900/5"
+                >
+                  <Chrome className="w-5 h-5 text-white" />
+                  Continue with Google
+                </button>
+              </div>
+
+              {/* Divider */}
+              <div className="relative my-8">
+                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-slate-800/50"></div>
+                <div className="relative flex justify-center">
+                  <span className="bg-slate-900 px-4 text-[10px] font-black text-slate-700 uppercase tracking-[0.3em]">Or use email</span>
+                </div>
+              </div>
+
               {/* Email Form */}
-              <form onSubmit={handleAuth} className="space-y-5 mt-8">
+              <form onSubmit={handleAuth} className="space-y-4">
                 <div>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600" />
@@ -211,23 +233,6 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
               </AnimatePresence>
 
 
-              {/* Divider */}
-              <div className="relative my-10">
-                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-slate-800"></div>
-                <div className="relative flex justify-center">
-                  <span className="bg-slate-900 px-4 text-[10px] font-black text-slate-600 uppercase tracking-[0.3em]">Or</span>
-                </div>
-              </div>
-
-              {/* Social Login */}
-              <button
-                onClick={handleGoogleSignIn}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-3 py-4 bg-slate-950 border border-slate-800 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all active:scale-95"
-              >
-                <Chrome className="w-5 h-5 text-white" />
-                Continue with Google
-              </button>
 
               {/* Toggle Login/Sign-up */}
               <div className="mt-8 text-center text-xs font-bold">
