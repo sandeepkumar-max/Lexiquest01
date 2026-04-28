@@ -77,12 +77,15 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
       }
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      if (err.message?.includes('12500')) {
+      const errorMessage = err?.message || (typeof err === 'string' ? err : 'Unknown error');
+      const lowerError = errorMessage.toLowerCase();
+      
+      if (lowerError.includes('12500')) {
         setError('Google Login Error: SHA-1 keys for this environment may be missing in Firebase.');
-      } else if (err.message?.includes('No credentials available')) {
-        setError('No Google account found on this device. Please sign in to Google in your phone settings.');
+      } else if (lowerError.includes('credential')) {
+        setError('Google Sign-In unavailable on this device. Please use Email and Password to create an account or sign in.');
       } else {
-        setError(err.message || 'Google Sign-In failed.');
+        setError(errorMessage || 'Google Sign-In failed.');
       }
     } finally {
       setLoading(false);
