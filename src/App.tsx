@@ -466,7 +466,30 @@ function App() {
   const [showAllRankings, setShowAllRankings] = useState(false);
   const [xpHistory, setXpHistory] = useState<number[]>(() => {
     const saved = localStorage.getItem('xpHistory');
-    return saved ? JSON.parse(saved) : [0, 0, 0, 0, 0, 0, 0];
+    let history = saved ? JSON.parse(saved) : [0, 0, 0, 0, 0, 0, 0];
+    
+    const lastUpdateStr = localStorage.getItem('lastXpUpdateDate');
+    const today = new Date().toDateString();
+    
+    if (lastUpdateStr && lastUpdateStr !== today) {
+      const lastUpdate = new Date(lastUpdateStr);
+      const now = new Date(today);
+      const diffTime = Math.abs(now.getTime() - lastUpdate.getTime());
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays >= 7) {
+        history = [0, 0, 0, 0, 0, 0, 0];
+      } else if (diffDays > 0) {
+        for (let i = 0; i < diffDays; i++) {
+          history.shift();
+          history.push(0);
+        }
+      }
+    }
+    
+    localStorage.setItem('lastXpUpdateDate', today);
+    localStorage.setItem('xpHistory', JSON.stringify(history));
+    return history;
   });
   const [isListening, setIsListening] = useState(false);
   const [isLexiSpeaking, setIsLexiSpeaking] = useState(false);
@@ -495,7 +518,7 @@ function App() {
       const { snapshots } = await FirebaseFirestore.getCollection({ 
         reference: 'ai_words',
         queryConstraints: [
-          { type: 'limit', count: 200 }
+          { type: 'limit', limit: 200 }
         ]
       });
       if (snapshots) {
@@ -607,6 +630,12 @@ function App() {
     }
   }, [testState]);
 
+  const testStateRef = useRef(testState);
+  useEffect(() => { testStateRef.current = testState; }, [testState]);
+
+  const feedbackStateRef = useRef(feedbackState);
+  useEffect(() => { feedbackStateRef.current = feedbackState; }, [feedbackState]);
+
   // AdMob Periodic Interstitial Loop
   useEffect(() => {
     // BYPASS: No ads for admin or premium users
@@ -616,6 +645,7 @@ function App() {
     }
 
     let adInterval: any;
+    let isAdShowing = false;
 
     const prepareAndShow = async () => {
       try {
@@ -626,10 +656,15 @@ function App() {
         });
         setAdReady(true);
         
-        // Wait 120 seconds before first ad
+        // Wait 300 seconds (5 mins) before first ad and between ads to reduce annoyance
         adInterval = setInterval(async () => {
-          if (!user || isPremium || !isPluginsInitialized.current || testState === 'testing') return;
+          if (!user || isPremium || !isPluginsInitialized.current) return;
+          if (testStateRef.current === 'testing' || isAdShowing) {
+            console.log("Skipping ad: Test running or ad already showing");
+            return;
+          }
           try {
+            isAdShowing = true;
             console.log("Showing Interstitial Ad...");
             await AdMob.showInterstitial();
             setAdReady(false);
@@ -640,8 +675,10 @@ function App() {
             console.error('Ad Show Error:', e);
             // Re-prepare on error
             await AdMob.prepareInterstitial({ adId: ADMOB_INTERSTITIAL_ID, isTesting: false }).catch(() => { });
+          } finally {
+            isAdShowing = false;
           }
-        }, 120000);
+        }, 300000); // 5 minutes
       } catch (err: any) {
         console.error('AdMob prepare error:', err);
         setErrorLog(prev => [...prev, `AdMob Error: ${err.message}`]);
@@ -655,12 +692,14 @@ function App() {
 
     AdMob.addListener('interstitialAdShowed' as any, () => {
       logAction("Ad Opened - Pausing Test Timer");
+      isAdShowing = true;
       pauseTimer();
     }).then(h => listeners.push(h));
 
     AdMob.addListener('interstitialAdDismissed' as any, () => {
       logAction("Ad Dismissed - Resuming Test Timer");
-      if (testState === 'testing' && feedbackState === 'none') {
+      isAdShowing = false;
+      if (testStateRef.current === 'testing' && feedbackStateRef.current === 'none') {
         startTimer(timeLeftRef.current);
       }
     }).then(h => listeners.push(h));
@@ -669,7 +708,7 @@ function App() {
       if (adInterval) clearInterval(adInterval);
       listeners.forEach(h => h.remove());
     };
-  }, [user, isPremium, adInitialized, testState, feedbackState]);
+  }, [user, isPremium, adInitialized]);
 
   // AdMob and setup periodic interstitial
 
@@ -1009,28 +1048,53 @@ function App() {
       const now = Date.now();
       if (lastFetch && now - parseInt(lastFetch) < 300000) { // 5 min cache
         const cached = localStorage.getItem('cached_leaderboard');
-        if (cached) {
+        if (cached && cached !== '[]') {
           setLeaderboard(JSON.parse(cached));
           return;
         }
       }
 
-      const { snapshots } = await FirebaseFirestore.getCollection({
-        reference: 'users',
-        queryConstraints: [
-          { type: 'orderBy', fieldPath: 'xp', direction: 'desc' },
-          { type: 'limit', count: 10 }
-        ]
-      });
-      if (snapshots) {
-        const board = snapshots
-          .map(s => s.data as any);
+      let board: any[] = [];
+      try {
+        const { snapshots } = await FirebaseFirestore.getCollection({
+          reference: 'users',
+          queryConstraints: [
+            { type: 'orderBy', fieldPath: 'xp', directionStr: 'desc' },
+            { type: 'limit', limit: 10 }
+          ]
+        });
+        if (snapshots) {
+          board = snapshots.map(s => s.data as any);
+        }
+      } catch (queryErr) {
+        console.error('Leaderboard query failed, trying fallback:', queryErr);
+        // Fallback: Fetch all users and sort locally in case of index/plugin issues
+        const { snapshots } = await FirebaseFirestore.getCollection({ reference: 'users' });
+        if (snapshots) {
+          board = snapshots
+            .map(s => s.data as any)
+            .sort((a: any, b: any) => (b.xp || 0) - (a.xp || 0))
+            .slice(0, 10);
+        }
+      }
+
+      if (board.length > 0) {
         setLeaderboard(board);
         localStorage.setItem('cached_leaderboard', JSON.stringify(board));
         localStorage.setItem('last_leaderboard_fetch', now.toString());
+      } else {
+        // If still empty (e.g., offline or empty db), show cached if available
+        const cached = localStorage.getItem('cached_leaderboard');
+        if (cached && cached !== '[]') {
+          setLeaderboard(JSON.parse(cached));
+        }
       }
-    } catch (err) {
-      console.error('Leaderboard error:', err);
+    } catch (err: any) {
+      console.error('Leaderboard fetch completely failed:', err);
+      const cached = localStorage.getItem('cached_leaderboard');
+      if (cached && cached !== '[]') {
+        setLeaderboard(JSON.parse(cached));
+      }
     }
   };
 
@@ -1066,8 +1130,8 @@ function App() {
         const { snapshots } = await FirebaseFirestore.getCollection({ 
           reference: 'shared_words',
           queryConstraints: [
-            { type: 'orderBy', fieldPath: 'createdAt', direction: 'desc' },
-            { type: 'limit', count: 200 }
+            { type: 'orderBy', fieldPath: 'createdAt', directionStr: 'desc' },
+            { type: 'limit', limit: 200 }
           ]
         });
         if (snapshots) {
@@ -1215,10 +1279,31 @@ function App() {
       localStorage.setItem('xp', newXp.toString());
 
       // Track daily progress
-      const currentHistory = [...xpHistory];
-      currentHistory[6] += amount;
-      setXpHistory(currentHistory);
-      localStorage.setItem('xpHistory', JSON.stringify(currentHistory));
+      setXpHistory(prevHistory => {
+        let currentHistory = [...prevHistory];
+        const today = new Date().toDateString();
+        const lastUpdateStr = localStorage.getItem('lastXpUpdateDate') || today;
+        
+        if (lastUpdateStr !== today) {
+          const lastUpdate = new Date(lastUpdateStr);
+          const now = new Date(today);
+          const diffDays = Math.floor(Math.abs(now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (diffDays >= 7) {
+            currentHistory = [0, 0, 0, 0, 0, 0, 0];
+          } else if (diffDays > 0) {
+            for (let i = 0; i < diffDays; i++) {
+              currentHistory.shift();
+              currentHistory.push(0);
+            }
+          }
+          localStorage.setItem('lastXpUpdateDate', today);
+        }
+        
+        currentHistory[6] += amount;
+        localStorage.setItem('xpHistory', JSON.stringify(currentHistory));
+        return currentHistory;
+      });
 
       // Level logic: level 1 is 0-100, level 2 is 100-300, level 3 is 300-600 (quadratic)
       const nextLevelThreshold = level * 100 * level;
@@ -3792,6 +3877,9 @@ function App() {
                     {xpHistory.map((val, i) => {
                       const maxVal = Math.max(...xpHistory, 100);
                       const height = (val / maxVal) * 100;
+                      const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                      const todayIndex = new Date().getDay();
+                      const label = days[(todayIndex - 6 + i + 7) % 7];
                       return (
                         <div key={i} className="flex-1 flex flex-col items-center gap-2">
                           <div className="w-full bg-slate-50 border border-slate-100 rounded-lg relative overflow-hidden h-full">
@@ -3801,7 +3889,7 @@ function App() {
                               className="absolute bottom-0 left-0 right-0 bg-indigo-600 rounded-t-sm"
                             />
                           </div>
-                          <span className="text-[8px] font-bold text-slate-400">{['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}</span>
+                          <span className="text-[8px] font-bold text-slate-400">{label}</span>
                         </div>
                       )
                     })}
@@ -4165,141 +4253,148 @@ function App() {
 
               {/* Result Card */}
               {dictResult && (
-                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                  {/* Word Header */}
-                  <div className="bg-indigo-600 p-5 text-white">
-                    <div className="flex items-center justify-between">
+                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-2xl shadow-indigo-900/5 overflow-hidden">
+                  {/* Top Section */}
+                  <div className="p-6 relative">
+                    <div className="flex items-start justify-between relative z-10">
                       <div>
-                        <h3 className="text-2xl font-bold capitalize">{dictResult.word}</h3>
+                        <h3 className="text-3xl font-black text-slate-900 capitalize tracking-tight mb-1">{dictResult.word}</h3>
                         {dictResult.phonetic && (
-                          <p className="text-indigo-200 text-sm mt-0.5">{dictResult.phonetic}</p>
+                          <p className="text-indigo-500 font-bold text-sm tracking-widest uppercase">{dictResult.phonetic}</p>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        {dictAudio && (
-                          <button
-                            onClick={() => dictAudio.play()}
-                            className="p-3 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
-                            title="Play pronunciation"
-                          >
-                            <Volume2 className="w-6 h-6" />
-                          </button>
-                        )}
-                      </div>
+                      {dictAudio && (
+                        <button
+                          onClick={() => dictAudio.play()}
+                          className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-full transition-all active:scale-95 shadow-sm"
+                          title="Play pronunciation"
+                        >
+                          <Volume2 className="w-5 h-5" />
+                        </button>
+                      )}
                     </div>
 
-                    <div className="mt-4 px-5 flex flex-col gap-3">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleTranslateDict}
-                          disabled={isTranslating}
-                          className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold transition-all shadow-md ${isTranslating ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-indigo-500 to-indigo-700 text-white hover:shadow-lg active:scale-95'}`}
-                        >
-                          {isTranslating ? (
-                            <div className="w-5 h-5 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <>
-                              <Languages className="w-5 h-5" />
-                              {hindiTranslation ? 'Refresh Translation' : 'Hindi Meaning'}
-                            </>
-                          )}
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (!dictResult) return;
-                            const wordToAdd = {
-                              word: dictResult.word,
-                              meaning: hindiTranslation || (dictResult.meanings[0]?.definitions[0]?.definition || 'No definition'),
-                              example: dictResult.meanings[0]?.definitions[0]?.example || 'No example available',
-                              category: 'Custom'
-                            };
-                            setCustomWords(prev => [wordToAdd, ...prev]);
-                            const updatedCustom = [wordToAdd, ...customWords];
-                            localStorage.setItem('customWords', JSON.stringify(updatedCustom));
-                            setAlertMessage(`"${dictResult.word}" added to your dictionary! ✨`);
-                          }}
-                          className="px-6 bg-white border border-indigo-200 text-indigo-600 rounded-2xl font-bold hover:bg-indigo-50 transition-all shadow-sm flex items-center justify-center gap-2"
-                        >
-                          <Plus className="w-5 h-5" />
-                          Add
-                        </button>
-                      </div>
+                    {/* Action Bar */}
+                    <div className="mt-6 flex gap-3 relative z-10">
+                      <button
+                        onClick={handleTranslateDict}
+                        disabled={isTranslating}
+                        className={`flex-1 py-3.5 px-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${
+                          isTranslating ? 'bg-slate-100 text-slate-400' 
+                          : hindiTranslation ? 'bg-amber-50 border border-amber-100 text-amber-700 hover:bg-amber-100' 
+                          : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-indigo-200 hover:shadow-lg active:scale-95'
+                        }`}
+                      >
+                        {isTranslating ? (
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <Languages className="w-4 h-4" />
+                            {hindiTranslation ? 'Refresh Translation' : 'Hindi Meaning'}
+                          </>
+                        )}
+                      </button>
 
+                      <button
+                        onClick={() => {
+                          if (!dictResult) return;
+                          const wordToAdd = {
+                            word: dictResult.word,
+                            meaning: hindiTranslation || (dictResult.meanings[0]?.definitions[0]?.definition || 'No definition'),
+                            example: dictResult.meanings[0]?.definitions[0]?.example || 'No example available',
+                            category: 'Custom'
+                          };
+                          setCustomWords(prev => [wordToAdd, ...prev]);
+                          const updatedCustom = [wordToAdd, ...customWords];
+                          localStorage.setItem('customWords', JSON.stringify(updatedCustom));
+                          setAlertMessage(`"${dictResult.word}" added to your dictionary! ✨`);
+                        }}
+                        className="px-6 py-3.5 bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Save
+                      </button>
+                    </div>
+
+                    {/* Translation Result */}
+                    <AnimatePresence>
                       {hindiTranslation && (
                         <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="mt-2 bg-amber-50 border border-amber-200 p-5 rounded-2xl"
+                          initial={{ opacity: 0, height: 0, y: -10 }}
+                          animate={{ opacity: 1, height: 'auto', y: 0 }}
+                          className="mt-4 overflow-hidden"
                         >
-                          <div className="flex items-center gap-2 mb-2 text-amber-700 font-black uppercase text-[10px] tracking-widest">
-                            <CheckCircle className="w-4 h-4" /> Hindi Translation
+                          <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100/50 p-5 rounded-2xl">
+                            <div className="flex items-center gap-1.5 mb-2 text-amber-700 font-black uppercase text-[10px] tracking-widest">
+                              <CheckCircle className="w-3 h-3" /> Hindi Translation
+                            </div>
+                            <p className="font-sans text-lg text-slate-800 font-bold">
+                              {hindiTranslation}
+                            </p>
                           </div>
-                          <p className="whitespace-pre-wrap font-sans text-base text-slate-800 leading-relaxed font-semibold">
-                            {hindiTranslation}
-                          </p>
                         </motion.div>
                       )}
+                    </AnimatePresence>
 
-                      {(smartThesaurus || isRefiningThesaurus) && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="mt-3 bg-indigo-50 border border-indigo-100 p-5 rounded-2xl"
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2 text-indigo-700 font-black uppercase text-[10px] tracking-widest">
-                              <Sparkles className="w-4 h-4" /> Smart Thesaurus
-                            </div>
-                            {isRefiningThesaurus && (
-                              <div className="w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
-                            )}
+                    {/* Smart Thesaurus */}
+                    {(smartThesaurus || isRefiningThesaurus) && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-4 bg-indigo-50/50 border border-indigo-100 p-5 rounded-2xl"
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-1.5 text-indigo-700 font-black uppercase text-[10px] tracking-widest">
+                            <Sparkles className="w-3 h-3" /> Smart Thesaurus
                           </div>
-
-                          {smartThesaurus && (
-                            <div className="space-y-4">
-                              {/* Smart Synonyms */}
-                              <div>
-                                <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                                  <CheckCircle className="w-3 h-3" /> Verified Synonyms
-                                </p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {smartThesaurus.synonyms.map((syn, sIdx) => (
-                                    <button
-                                      key={sIdx}
-                                      onClick={() => { setDictQuery(syn); searchDictionary(syn); }}
-                                      className="px-3 py-1 bg-white text-emerald-700 text-xs font-bold rounded-lg border border-emerald-100 hover:bg-emerald-50 transition-colors shadow-sm"
-                                    >
-                                      {syn}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {/* Smart Antonyms */}
-                              <div>
-                                <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                                  <X className="w-3 h-3" /> Verified Antonyms
-                                </p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {smartThesaurus.antonyms.map((ant, aIdx) => (
-                                    <button
-                                      key={aIdx}
-                                      onClick={() => { setDictQuery(ant); searchDictionary(ant); }}
-                                      className="px-3 py-1 bg-white text-rose-700 text-xs font-bold rounded-lg border border-rose-100 hover:bg-rose-50 transition-colors shadow-sm"
-                                    >
-                                      {ant}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
+                          {isRefiningThesaurus && (
+                            <div className="w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
                           )}
-                        </motion.div>
-                      )}
-                    </div>
+                        </div>
+
+                        {smartThesaurus && (
+                          <div className="space-y-4">
+                            <div>
+                              <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                                <CheckCircle className="w-3 h-3" /> Verified Synonyms
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {smartThesaurus.synonyms.map((syn, sIdx) => (
+                                  <button
+                                    key={sIdx}
+                                    onClick={() => { setDictQuery(syn); searchDictionary(syn); }}
+                                    className="px-3 py-1 bg-white text-emerald-700 text-xs font-bold rounded-lg border border-emerald-100 hover:bg-emerald-50 transition-colors shadow-sm"
+                                  >
+                                    {syn}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                                <X className="w-3 h-3" /> Verified Antonyms
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {smartThesaurus.antonyms.map((ant, aIdx) => (
+                                  <button
+                                    key={aIdx}
+                                    onClick={() => { setDictQuery(ant); searchDictionary(ant); }}
+                                    className="px-3 py-1 bg-white text-rose-700 text-xs font-bold rounded-lg border border-rose-100 hover:bg-rose-50 transition-colors shadow-sm"
+                                  >
+                                    {ant}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
                   </div>
 
-                  <div className="p-5 space-y-6">
+                  <div className="h-px bg-slate-100 mx-6"></div>
+
+                  <div className="p-6 space-y-6">
                     {dictResult.meanings.map((meaning, mIdx) => {
                       // collect all synonyms & antonyms from this meaning
                       const allSynonyms = Array.from(new Set([
