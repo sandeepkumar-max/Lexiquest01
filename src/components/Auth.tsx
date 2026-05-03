@@ -83,7 +83,7 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
       if (lowerError.includes('12500')) {
         setError('Google Login Error: SHA-1 keys for this environment may be missing in Firebase.');
       } else if (lowerError.includes('credential')) {
-        setError('Google Sign-In unavailable on this device. Please use Email and Password to create an account or sign in.');
+        setError('Google Sign-In prompt was cancelled or encountered a device error. Please try again or use Email/Password.');
       } else {
         setError(errorMessage || 'Google Sign-In failed.');
       }

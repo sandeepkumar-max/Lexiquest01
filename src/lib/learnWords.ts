@@ -1475,7 +1475,7 @@ export const LEARN_WORDS = [
   { word: "astonish", meaning: "हैरान करना", example: "The news astonished everyone.", category: "Emotion" },
   { word: "attachment", meaning: "लगाव", example: "She has a strong attachment to the dog.", category: "Personal" },
   { word: "audacity", meaning: "धृष्टता", example: "He had the audacity to lie.", category: "Ethics" },
-  { word: "基本上", meaning: "मूल रूप से", example: "Basically, it works.", category: "Logic" },
+  { word: "basically", meaning: "मूल रूप से", example: "Basically, it works.", category: "Logic" },
   { word: "bewilder", meaning: "हैरान करना", example: "The question bewildered him.", category: "Emotion" },
   { word: "by-product", meaning: "सह-उत्पाद", example: "Pollution is a by-product.", category: "Science" },
   { word: "calibration", meaning: "अंशांकन", example: "", category: "Scientific" },

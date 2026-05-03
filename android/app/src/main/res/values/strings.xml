@@ -4,4 +4,6 @@
     <string name="title_activity_main">LexiQuest</string>
     <string name="package_name">com.lexiquest.app</string>
     <string name="custom_url_scheme">com.lexiquest.app</string>
+    <string name="server_client_id">78991956591-f98ijc9qi1741bmlqnf7s6ti2q5p8eeb.apps.googleusercontent.com</string>
+    <string name="default_web_client_id">78991956591-f98ijc9qi1741bmlqnf7s6ti2q5p8eeb.apps.googleusercontent.com</string>
 </resources>

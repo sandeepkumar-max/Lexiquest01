@@ -18,7 +18,7 @@ import { TextToSpeech } from '@capacitor-community/text-to-speech';
 import { AdMob } from '@capacitor-community/admob';
 import { App as CapApp } from '@capacitor/app';
 import { Dialog } from '@capacitor/dialog';
-import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info, Languages, Mic, Moon, Sun, BarChart3, Trophy, Phone, Bookmark, PhoneOff, User } from 'lucide-react';
+import { Book, BookOpen, Search, Settings, Plus, Trash2, CheckCircle, AlertCircle, FileText, GraduationCap, PenTool, Lock, Unlock, Volume2, X, Sliders, Bell, Flame, Save, Download, Upload, Share2, Clock, ChevronLeft, Star, LogIn, UserPlus, Target, Sparkles, Send, Bot, MessageSquare, RefreshCw, Info, Languages, Mic, Moon, Sun, BarChart3, Trophy, Phone, Bookmark, PhoneOff, User, Sword, Zap } from 'lucide-react';
 import { COMMON_WORDS } from './lib/dictionary';
 import { LEARN_WORDS } from './lib/learnWords';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
@@ -58,7 +58,6 @@ class ErrorBoundary extends React.Component<any, any> {
           <p className="text-slate-500 mb-8 max-w-xs mx-auto text-sm">{(this.state as any).error?.message || 'Unknown Error'}</p>
           <button 
             onClick={() => {
-              localStorage.clear();
               window.location.reload();
             }}
             className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-indigo-200"
@@ -247,6 +246,34 @@ function App() {
 
 
 
+  // Tour State
+  const [tourStep, setTourStep] = useState(() => localStorage.getItem('hasSeenTour') ? 0 : 1);
+  const nextTourStep = () => {
+    if (tourStep === 3) {
+      setTourStep(0);
+      localStorage.setItem('hasSeenTour', 'true');
+    } else {
+      setTourStep(prev => prev + 1);
+    }
+  };
+
+  // Arena State
+  const [arenaState, setArenaState] = useState<'idle' | 'battling' | 'result'>('idle');
+  const [arenaHp, setArenaHp] = useState(100);
+  const [arenaWordObj, setArenaWordObj] = useState<{word: string, meaning: string} | null>(null);
+  const [arenaInput, setArenaInput] = useState('');
+  const [arenaLoading, setArenaLoading] = useState(false);
+  const [arenaFeedback, setArenaFeedback] = useState<{damage: number, msg: string, crit: boolean} | null>(null);
+
+  const startArenaBattle = () => {
+     setArenaHp(100);
+     setArenaFeedback(null);
+     setArenaInput('');
+     const w = LEARN_WORDS[Math.floor(Math.random() * LEARN_WORDS.length)];
+     setArenaWordObj(w);
+     setArenaState('battling');
+  };
+
   // AI Coach State
   const [aiChat, setAiChat] = useState<{ role: 'user' | 'model', content: string }[]>([]);
   const [aiInput, setAiInput] = useState('');
@@ -265,6 +292,13 @@ function App() {
       const localEmail = localStorage.getItem('userEmail');
       if (localEmail === MASTER_ADMIN_EMAIL) return true;
       return localStorage.getItem('isPremium') === 'true';
+    } catch (e) { return false; }
+  });
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try {
+      const localEmail = localStorage.getItem('userEmail');
+      if (localEmail === MASTER_ADMIN_EMAIL) return true;
+      return localStorage.getItem('isAdmin') === 'true';
     } catch (e) { return false; }
   });
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
@@ -639,7 +673,7 @@ function App() {
   // AdMob Periodic Interstitial Loop
   useEffect(() => {
     // BYPASS: No ads for admin or premium users
-    const isMasterAdmin = user?.email === MASTER_ADMIN_EMAIL;
+    const isMasterAdmin = user?.email === MASTER_ADMIN_EMAIL || isAdmin;
     if (!Capacitor.isNativePlatform() || !user || isPremium || isMasterAdmin || !adInitialized) {
       return;
     }
@@ -752,6 +786,7 @@ function App() {
           // 2. Extract premium status
           const userData = userDoc.snapshot?.data as any;
           const isPremiumUser = userData?.premium === true;
+          const isRoleAdmin = userData?.role === 'admin';
           const deletionRequestedAt = userData?.deletionRequestedAt;
 
           // Check for pending deletion
@@ -777,6 +812,15 @@ function App() {
 
           // AUTHENTICATION LOGIC: Purely based on Firestore premium field
           // ADMIN OVERRIDE: Prioritize master admin email
+          const userIsAdmin = result.user.email === MASTER_ADMIN_EMAIL || isRoleAdmin;
+          if (userIsAdmin) {
+            setIsAdmin(true);
+            localStorage.setItem('isAdmin', 'true');
+          } else {
+            setIsAdmin(false);
+            localStorage.setItem('isAdmin', 'false');
+          }
+
           if (result.user.email === MASTER_ADMIN_EMAIL || isPremiumUser) {
             setIsPremium(true);
             localStorage.setItem('isPremium', 'true');
@@ -1263,6 +1307,22 @@ function App() {
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toDateString();
+
+        const now = new Date(today);
+        const diffDays = Math.floor(Math.abs(now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (diffDays >= 7) {
+          // Automatic XP decay after 7 days of inactivity
+          setXp(prev => {
+            if (prev <= 0) return 0;
+            const penalty = diffDays * 50; 
+            const newXp = Math.max(0, prev - penalty);
+            localStorage.setItem('xp', newXp.toString());
+            return newXp;
+          });
+          setLastPracticeDate(today);
+          localStorage.setItem('lastPracticeDate', today);
+        }
 
         // If last practice was NOT today and NOT yesterday, streak is broken
         if (lastPracticeDate !== yesterdayStr) {
@@ -1990,6 +2050,8 @@ function App() {
 
   const handleTimeout = () => {
     if (feedbackState !== 'none') return;
+    if (!testWords || !testWords[currentTestWordIndex]) return; // Safeguard against crash
+
     if (soundEnabled) wrongSound.play().catch(() => {});
     setFeedbackState('timeout');
     const newAnswers = [...userAnswers, '']; // Blank for timeout
@@ -2051,24 +2113,48 @@ function App() {
     if (!word) return;
     setIsLexiSpeaking(true);
 
-    // Try Natural Neural Voice first if online (limit to 300 chars for API safety)
+    // Try Natural Neural Voice (ElevenLabs) first if online (limit to 300 chars for API safety)
     if (!isOffline && word.length < 300) {
       try {
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(word)}&tl=en&client=tw-ob`;
+        const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM', {
+          method: 'POST',
+          headers: {
+            'xi-api-key': 'sk_29bb55b109a201a44a715e920dd050f9b6f356a89352136a',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            text: word,
+            model_id: 'eleven_monolingual_v1',
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.5
+            }
+          })
+        });
+
+        if (!response.ok) throw new Error('ElevenLabs API failed');
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        
-        audio.onended = () => setIsLexiSpeaking(false);
+
+        audio.onended = () => {
+          setIsLexiSpeaking(false);
+          URL.revokeObjectURL(url);
+        };
         audio.onerror = () => {
-          console.warn("Online natural voice failed, using native fallback");
+          console.warn("ElevenLabs voice failed, using native fallback");
+          URL.revokeObjectURL(url);
           playNative(word);
         };
-        
-        // 3-second timeout for online play
+
+        // 5-second timeout for online play (API can be slightly slower)
         const playPromise = audio.play();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000));
-        
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+
         await Promise.race([playPromise, timeoutPromise]);
       } catch (e) {
+        console.warn("ElevenLabs Error:", e);
         playNative(word);
       }
     } else {
@@ -2142,6 +2228,8 @@ function App() {
 
   const handleAnswerSubmit = (answer: string) => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (!testWords || !testWords[currentTestWordIndex]) return; // Safeguard against crash
+
     const newAnswers = [...userAnswers, answer.toLowerCase()];
     setUserAnswers(newAnswers);
 
@@ -2672,6 +2760,67 @@ function App() {
     }
   };
 
+  const evaluateArenaSentence = async () => {
+    if (!arenaInput.trim() || arenaLoading || !arenaWordObj) return;
+    setArenaLoading(true);
+    setArenaFeedback(null);
+
+    try {
+      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+      if (!apiKey) {
+         setArenaFeedback({ damage: 0, msg: "API Key missing. Ask the developer.", crit: false });
+         setArenaLoading(false);
+         return;
+      }
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { 
+              role: 'system', 
+              content: `You are an AI judge for a vocabulary RPG game. 
+Rule: The user must write a sentence using the word "${arenaWordObj.word}".
+Evaluate the sentence based on grammar and complexity.
+Output JSON format ONLY: {"damage": number, "msg": "short feedback message"}. 
+If they didn't use the word or grammar is completely wrong -> damage: 0. 
+If sentence is simple and correct -> damage: 15. 
+If sentence is complex, creative, and correct -> damage: 50. Do not output anything other than JSON.`
+            },
+            { role: 'user', content: arenaInput }
+          ]
+        })
+      });
+
+      const data = await response.json();
+      const content = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
+      const result = JSON.parse(content);
+      
+      const dmg = result.damage || 0;
+      setArenaFeedback({ damage: dmg, msg: result.msg, crit: dmg >= 50 });
+      setArenaHp(prev => Math.max(0, prev - dmg));
+      setArenaInput('');
+      
+      if (arenaHp - dmg <= 0) {
+        setTimeout(() => setArenaState('result'), 2000);
+      } else if (dmg > 0) {
+        // Change word after a successful hit
+        setTimeout(() => {
+          const w = LEARN_WORDS[Math.floor(Math.random() * LEARN_WORDS.length)];
+          setArenaWordObj(w);
+          setArenaFeedback(null);
+        }, 3000);
+      }
+    } catch (e) {
+      console.error(e);
+      setArenaFeedback({ damage: 0, msg: "The monster blocked your attack! (Error)", crit: false });
+    } finally {
+      setArenaLoading(false);
+    }
+  };
+
   const handleAiSendMessage = async (suggestion?: string, fromCall = false) => {
     const txt = suggestion || aiInput;
     logAction(`Sending AI Message: ${txt.slice(0, 20)}...`);
@@ -2816,7 +2965,14 @@ function App() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          {user?.email === MASTER_ADMIN_EMAIL && (
+          <button
+            onClick={() => setActiveTab('dictionary')}
+            className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 text-slate-400 border border-slate-100 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+            title="Dictionary Search"
+          >
+            <Search className="w-5 h-5" />
+          </button>
+          {isAdmin && (
             <button
               onClick={() => setAdminAddModalOpen(true)}
               className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100 hover:bg-amber-100 transition-colors shadow-sm"
@@ -2849,7 +3005,7 @@ function App() {
             }`}
         >
           <Book className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Learn</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Journey</span>
         </button>
         <button
           onClick={() => setActiveTab('test')}
@@ -2858,44 +3014,17 @@ function App() {
             : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
             }`}
         >
-          <CheckCircle className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Test</span>
+          <Sword className="w-6 h-6" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Arena</span>
         </button>
         <button
           onClick={() => {
-            // if (!hasPremium) {
-            //   setSubscriptionModalOpen(true);
-            //   return;
-            // }
             setActiveTab('ai-coach');
           }}
           className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 relative transition-colors ${activeTab === 'ai-coach' ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}
         >
           <Bot className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Lexi</span>
-          {/* {!hasPremium && (
-            <Sparkles className="w-2.5 h-2.5 text-amber-500 absolute top-2 right-1/2 translate-x-4 fill-amber-500" />
-          )} */}
-        </button>
-        <button
-          onClick={() => setActiveTab('grammar')}
-          className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 transition-colors ${activeTab === 'grammar'
-            ? 'text-indigo-600'
-            : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
-            }`}
-        >
-          <Languages className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Grammar</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('dictionary')}
-          className={`flex-1 flex flex-col items-center justify-center py-3 gap-1 transition-colors ${activeTab === 'dictionary'
-            ? 'text-indigo-600'
-            : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
-            }`}
-        >
-          <BookOpen className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Dict</span>
         </button>
         <button
           onClick={() => setActiveTab('profile')}
@@ -2907,7 +3036,6 @@ function App() {
           <UserPlus className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Profile</span>
         </button>
-
       </nav>
 
       {/* Main Content Area */}
@@ -2957,6 +3085,23 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Enter Grammar Hub Button */}
+              <button
+                onClick={() => setActiveTab('grammar')}
+                className="w-full mb-10 py-5 bg-white border border-indigo-100 rounded-3xl shadow-sm hover:shadow-md hover:border-indigo-300 transition-all active:scale-[0.98] flex items-center justify-between px-6 group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
+                    <Languages className="w-6 h-6" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-black text-slate-900">Grammar Hub</h3>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-widest">Master Sentence Rules</p>
+                  </div>
+                </div>
+                <ChevronLeft className="w-6 h-6 text-indigo-300 rotate-180 group-hover:translate-x-1 transition-transform" />
+              </button>
 
               {/* Search Box */}
               <div className="mb-8 relative group">
@@ -3449,314 +3594,139 @@ function App() {
           </div>
         )}
         {activeTab === 'test' && (
-          <div className="flex-1 p-6 lg:p-10 overflow-y-auto flex flex-col items-center justify-center">
-            <div className="max-w-2xl w-full bg-white p-8 rounded-3xl shadow-sm border border-gray-200 text-center">
-              {testState === 'start' && (
-                <>
-                  <GraduationCap className="w-20 h-20 text-indigo-600 mx-auto mb-6" />
-                  <h2 className="text-3xl font-bold mb-4">Spelling Test</h2>
-                  <p className="text-gray-600 mb-8 text-lg">
-                    Choose a test mode to practice your spelling skills. You will be tested on 10 random words.
+          <div className="flex-1 p-6 lg:p-10 overflow-y-auto bg-slate-900 text-white relative">
+            <div className="max-w-2xl mx-auto text-center mt-10">
+              {arenaState === 'idle' && (
+                <div className="animate-in fade-in zoom-in duration-500">
+                  <Flame className="w-24 h-24 text-orange-500 mx-auto mb-6 animate-pulse" />
+                  <h2 className="text-4xl font-black mb-4">Welcome to the Arena</h2>
+                  <p className="text-slate-400 mb-8 max-w-sm mx-auto text-lg">
+                    Defeat the grammar monster by using vocabulary words correctly in a sentence.
                   </p>
-
-                  <div className="mb-8">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Select Difficulty</p>
-                    <div className="flex bg-gray-100 p-1 rounded-2xl max-w-xs mx-auto">
-                      {(['easy', 'medium', 'hard'] as const).map((d) => (
-                        <button
-                          key={d}
-                          onClick={() => setTestDifficulty(d)}
-                          className={`flex-1 py-2.5 rounded-xl text-sm font-bold capitalize transition-all ${testDifficulty === d
-                            ? 'bg-white text-indigo-600 shadow-sm'
-                            : 'text-gray-500 hover:text-gray-700'
-                            }`}
-                        >
-                          {d}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-4 max-w-sm mx-auto">
+                  <div className="flex flex-col gap-4 max-w-sm mx-auto w-full">
                     <button
-                      onClick={() => startTest('listen-mcq')}
-                      className="px-6 py-4 bg-indigo-600 text-white text-lg font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg flex items-center justify-center gap-3"
+                      onClick={startArenaBattle}
+                      className="w-full py-5 bg-orange-600 text-white text-xl font-black rounded-3xl shadow-lg shadow-orange-500/20 hover:scale-[1.02] active:scale-95 transition-all flex flex-col items-center justify-center gap-1 border-b-4 border-orange-800 relative overflow-hidden group"
                     >
-                      <Volume2 className="w-6 h-6" />
-                      Listen & Choose
+                      <div className="absolute inset-0 bg-white/20 w-full h-full -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
+                      <span className="flex items-center gap-2"><Flame className="w-6 h-6" /> Boss Battle</span>
+                      <span className="text-[10px] font-bold text-orange-200 uppercase tracking-widest">Sentence Striker</span>
                     </button>
+                    
                     <button
-                      onClick={() => startTest('listen-type')}
-                      className="px-6 py-4 bg-indigo-600 text-white text-lg font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg flex items-center justify-center gap-3"
+                      onClick={() => alert("Speed Sprint mode coming in next update!")}
+                      className="w-full py-5 bg-indigo-600 text-white text-xl font-black rounded-3xl shadow-lg shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 transition-all flex flex-col items-center justify-center gap-1 border-b-4 border-indigo-800"
                     >
-                      <PenTool className="w-6 h-6" />
-                      Listen & Type
-                    </button>
-                    <button
-                      onClick={() => startTest('visual-mcq')}
-                      className="px-6 py-4 bg-indigo-600 text-white text-lg font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg flex items-center justify-center gap-3"
-                    >
-                      <Book className="w-6 h-6" />
-                      Visual MCQ
-                    </button>
-
-                    {/* Premium Locked Test Mode */}
-                    <button
-                      onClick={() => {
-                        if (hasPremium) {
-                          startTest('meaning-mcq');
-                        } else {
-                          setSubscriptionModalOpen(true);
-                        }
-                      }}
-                      className={`px-6 py-4 border-2 font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-3 relative ${hasPremium
-                        ? 'bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700'
-                        : 'bg-white border-indigo-100 text-indigo-400 hover:border-indigo-200'
-                        }`}
-                    >
-                      <GraduationCap className="w-6 h-6" />
-                      Meaning & Context
-                      {!hasPremium && (
-                        <Lock className="w-4 h-4 absolute top-2 right-2 text-indigo-300" />
-                      )}
+                      <span className="flex items-center gap-2"><Zap className="w-6 h-6" /> Speed Sprint</span>
+                      <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">MCQ Survival (Coming Soon)</span>
                     </button>
                   </div>
-                </>
+                </div>
               )}
 
-              {testState === 'testing' && (
-                <>
-                  <div className="flex justify-between items-center mb-8 text-sm font-medium text-gray-500">
-                    <button
-                      onClick={async () => {
-                        const { value } = await Dialog.confirm({
-                          title: 'Exit Test?',
-                          message: 'Are you sure you want to stop? Your progress will not be saved.',
-                          okButtonTitle: 'Yes, Exit',
-                          cancelButtonTitle: 'Stay'
-                        });
-                        
-                        if (value) {
-                          window.speechSynthesis?.cancel();
-                          TextToSpeech.stop().catch(() => { });
-                          setTestState('start');
-                          setFeedbackState('none');
-                          setTypedAnswer('');
-                          setUserAnswers([]);
-                        }
-                      }}
-                      className="flex items-center gap-1 text-gray-400 hover:text-red-500 transition-colors"
-                      title="Exit Test"
+              {arenaState === 'battling' && arenaWordObj && (
+                <div className="animate-in fade-in slide-in-from-bottom-8">
+                  {/* Exit/Flee Header */}
+                  <div className="flex justify-between items-center mb-6">
+                    <button 
+                      onClick={() => setArenaState('idle')}
+                      className="flex items-center gap-1 text-slate-400 hover:text-white transition-colors px-3 py-1.5 bg-slate-800 rounded-lg shadow-sm active:scale-95 border border-slate-700"
                     >
-                      <ChevronLeft className="w-5 h-5" />
-                      <span className="text-xs font-medium">Exit</span>
+                      <ChevronLeft className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase tracking-widest">Flee</span>
                     </button>
-                    <span>Word {currentTestWordIndex + 1} of {testWords.length}</span>
-                    <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full capitalize">
-                      {testMode.replace('-', ' ')}
-                    </span>
+                    <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-500/10 px-3 py-1.5 rounded-lg border border-orange-500/20 flex items-center gap-1"><Flame className="w-3 h-3"/> Boss Battle</span>
                   </div>
-
-                  {/* Timer Progress Bar */}
-                  <div className="w-full h-2 bg-gray-100 rounded-full mb-8 overflow-hidden">
-                    <motion.div
-                      initial={{ width: '100%' }}
-                      animate={{ width: `${(timeLeft / 15) * 100}%` }}
-                      transition={{ duration: 1, ease: 'linear' }}
-                      className={`h-full ${timeLeft < 5 ? 'bg-red-500' : 'bg-indigo-600'}`}
+                  {/* Monster UI */}
+                  <div className="relative w-48 h-48 mx-auto mb-8">
+                    <div className="absolute inset-0 bg-red-500/20 rounded-full blur-3xl animate-pulse" />
+                    <img 
+                      src="https://api.dicebear.com/7.x/bottts/svg?seed=Monster&backgroundColor=transparent" 
+                      alt="Monster" 
+                      className={`w-full h-full object-contain relative z-10 transition-transform duration-300 ${arenaFeedback ? 'scale-90 opacity-80' : 'animate-bounce'}`} 
                     />
+                    
+                    {/* HP Bar */}
+                    <div className="absolute -bottom-6 w-full bg-slate-800 rounded-full h-4 border border-slate-700 overflow-hidden">
+                      <div 
+                        className="h-full bg-red-500 transition-all duration-500" 
+                        style={{ width: `${arenaHp}%` }}
+                      />
+                    </div>
+                    <div className="absolute -bottom-6 w-full text-center text-[10px] font-black">{arenaHp}/100 HP</div>
                   </div>
 
-                  {testMode !== 'visual-mcq' && (
-                    <button
-                      onClick={() => playWord(testWords[currentTestWordIndex])}
-                      className="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8 hover:bg-indigo-100 transition-colors shadow-sm"
-                      title="Play Word Again"
-                    >
-                      <Volume2 className="w-10 h-10" />
-                    </button>
+                  {/* Feedback Overlay */}
+                  {arenaFeedback && (
+                     <div className="mb-6 p-4 rounded-xl border animate-in slide-in-from-top-4 bg-slate-800/80 border-slate-700 backdrop-blur-sm">
+                        <h4 className={`text-2xl font-black mb-1 ${arenaFeedback.crit ? 'text-orange-500' : 'text-slate-300'}`}>
+                          -{arenaFeedback.damage} DAMAGE {arenaFeedback.crit && "CRITICAL HIT!"}
+                        </h4>
+                        <p className="text-slate-400 text-sm">{arenaFeedback.msg}</p>
+                     </div>
                   )}
 
-                  {testMode === 'visual-mcq' && (
-                    <h3 className="text-xl font-medium mb-8 text-gray-800">Select the correctly spelled word:</h3>
-                  )}
-
-                  {testMode === 'meaning-mcq' && (
-                    <div className="mb-8 max-w-lg mx-auto bg-white p-6 rounded-2xl border border-indigo-100 shadow-sm animate-in fade-in zoom-in duration-300">
-                      {(() => {
-                        const currentWord = testWords[currentTestWordIndex]?.toLowerCase();
-                        const wordObj = allLearnWords.find(w => w.word.toLowerCase() === currentWord);
-                        if (!wordObj) return <p className="text-gray-400 italic">Context loading...</p>;
-
-                        // Replace the word in the example sentence with "____"
-                        const displayExample = wordObj.example.replace(new RegExp(wordObj.word, 'gi'), '__________');
-
-                        return (
-                          <div className="space-y-4">
-                            <div className="flex flex-col items-center">
-                              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-[0.2em] mb-1">Hindi Meaning</span>
-                              <p className="text-3xl font-bold text-gray-900 mb-2">{wordObj.meaning}</p>
-                            </div>
-                            <div className="h-px bg-gray-100 w-1/4 mx-auto"></div>
-                            <div className="flex flex-col items-center">
-                              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-[0.2em] mb-1">Fill in the blank</span>
-                              <p className="text-lg text-gray-700 italic text-center">"{displayExample}"</p>
-                            </div>
-                          </div>
-                        );
-                      })()}
+                  {/* Weapon (Word) */}
+                  <div className="mb-8">
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-2">Your Weapon</p>
+                    <div className="inline-block px-6 py-3 bg-slate-800 border-2 border-slate-600 rounded-2xl">
+                      <span className="text-2xl font-black text-indigo-400">{arenaWordObj.word}</span>
                     </div>
-                  )}
+                    <p className="text-sm text-slate-500 mt-2 italic">{arenaWordObj.meaning}</p>
+                  </div>
 
-                  {testMode === 'listen-type' ? (
-                    <div className="flex flex-col items-center max-w-sm mx-auto">
+                  {/* Input */}
+                  <div className="flex flex-col gap-4">
+                    <div className="relative">
                       <input
                         type="text"
-                        value={typedAnswer}
-                        onChange={e => setTypedAnswer(e.target.value)}
-                        className={`border-2 rounded-xl p-4 text-xl text-center w-full mb-4 outline-none transition-all ${feedbackState === 'correct' ? 'border-green-500 bg-green-50 text-green-900' :
-                          (feedbackState === 'incorrect' || feedbackState === 'timeout') ? 'border-red-500 bg-red-50 text-red-900' :
-                            'border-gray-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 text-gray-900'
-                          }`}
-                        placeholder="Type the word here..."
-                        autoFocus
-                        disabled={feedbackState !== 'none'}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && typedAnswer.trim() && feedbackState === 'none') {
-                            handleAnswerSubmit(typedAnswer.trim());
-                          }
-                        }}
+                        disabled={arenaLoading}
+                        value={arenaInput}
+                        onChange={(e) => setArenaInput(e.target.value)}
+                        placeholder="Type a sentence using the word..."
+                        className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl pl-6 pr-14 py-4 text-lg text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-colors"
+                        onKeyDown={(e) => e.key === 'Enter' && evaluateArenaSentence()}
                       />
-                      {feedbackState === 'none' && (
-                        <button
-                          onClick={() => {
-                            if (typedAnswer.trim()) {
-                              handleAnswerSubmit(typedAnswer.trim());
-                            }
-                          }}
-                          disabled={!typedAnswer.trim()}
-                          className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                        >
-                          Submit Answer
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="max-w-md mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {mcqOptions[currentTestWordIndex]?.map((option, idx) => {
-                        let btnClass = "w-full py-4 px-6 bg-white border-2 border-gray-200 text-gray-800 text-lg font-medium rounded-xl hover:border-indigo-500 hover:bg-indigo-50 transition-all text-center";
-                        if (feedbackState !== 'none') {
-                          const isCorrectOption = option.toLowerCase() === testWords[currentTestWordIndex].toLowerCase();
-                          const isSelectedOption = option.toLowerCase() === userAnswers[currentTestWordIndex]?.toLowerCase();
-                          if (isCorrectOption) {
-                            btnClass = "w-full py-4 px-6 bg-green-50 border-2 border-green-500 text-green-800 text-lg font-medium rounded-xl transition-all text-center";
-                          } else if (isSelectedOption) {
-                            btnClass = "w-full py-4 px-6 bg-red-50 border-2 border-red-500 text-red-800 text-lg font-medium rounded-xl transition-all text-center";
-                          } else {
-                            btnClass = "w-full py-4 px-6 bg-gray-50 border-2 border-gray-200 text-gray-400 text-lg font-medium rounded-xl transition-all text-center opacity-50";
-                          }
-                        }
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => feedbackState === 'none' && handleAnswerSubmit(option)}
-                            disabled={feedbackState !== 'none'}
-                            className={`${btnClass} ${feedbackState === 'none' ? 'hover:scale-[1.02] active:scale-95' : ''}`}
-                          >
-                            {option}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {(feedbackState === 'incorrect' || feedbackState === 'timeout') && (
-                    <div className="mt-8 max-w-md mx-auto bg-red-50 border border-red-200 rounded-2xl p-6 text-left animate-in fade-in slide-in-from-bottom-4">
-                      <div className="flex items-center gap-2 text-red-600 mb-4">
-                        <AlertCircle className="w-6 h-6" />
-                        <h3 className="text-xl font-bold">{feedbackState === 'timeout' ? "Time's Up!" : "Incorrect"}</h3>
-                      </div>
-                      <div className="mb-4">
-                        <p className="text-sm text-gray-500 uppercase tracking-wider font-bold mb-1">Correct Word</p>
-                        <p className="text-2xl font-bold text-gray-900">{testWords[currentTestWordIndex]}</p>
-                      </div>
-                      {(() => {
-                        const currentWordObj = allLearnWords.find(w => w.word.toLowerCase() === testWords[currentTestWordIndex].toLowerCase());
-                        if (currentWordObj) {
-                          return (
-                            <div className="space-y-3">
-                              <div>
-                                <p className="text-sm text-gray-500 uppercase tracking-wider font-bold mb-1">Meaning</p>
-                                <p className="text-gray-800">{currentWordObj.meaning}</p>
-                              </div>
-                              <div>
-                                <p className="text-sm text-gray-500 uppercase tracking-wider font-bold mb-1">Example</p>
-                                <p className="text-gray-800 italic">"{currentWordObj.example}"</p>
-                              </div>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
                       <button
-                        onClick={() => handleNextQuestion(currentTestWordIndex)}
-                        className="mt-6 w-full py-3 bg-red-600 text-white rounded-xl font-bold text-lg hover:bg-red-700 transition-colors"
+                        onClick={() => setArenaInput(arenaWordObj?.example || "This is a great word.")}
+                        title="Lexi Hint"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/40 hover:text-white rounded-lg flex items-center justify-center transition-all"
                       >
-                        Next Word
+                        <Bot className="w-5 h-5" />
                       </button>
                     </div>
-                  )}
-
-                  {feedbackState === 'correct' && (
-                    <div className="mt-8 max-w-md mx-auto bg-green-50 border border-green-200 rounded-2xl p-4 text-center animate-in fade-in slide-in-from-bottom-4">
-                      <div className="flex items-center justify-center gap-2 text-green-600">
-                        <CheckCircle className="w-6 h-6" />
-                        <h3 className="text-xl font-bold">Correct!</h3>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {testState === 'results' && (
-                <>
-                  <h2 className="text-3xl font-bold mb-8">Test Results</h2>
-                  <div className="space-y-4 mb-8 text-left">
-                    {testWords.map((word, idx) => {
-                      const isCorrect = word.toLowerCase() === userAnswers[idx];
-                      return (
-                        <div key={idx} className={`p-4 rounded-xl border flex items-center justify-between ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                          <div className="flex items-center gap-3">
-                            {isCorrect ? <CheckCircle className="text-green-600 w-6 h-6" /> : <X className="text-red-600 w-6 h-6" />}
-                            <div>
-                              <p className="font-medium text-gray-900">Your answer: <span className={isCorrect ? 'text-green-700' : 'text-red-700 line-through'}>{userAnswers[idx] || '(blank)'}</span></p>
-                              {!isCorrect && <p className="text-sm text-green-700 font-medium mt-1">Correct: {word}</p>}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="text-2xl font-bold mb-8">
-                    Score: {userAnswers.filter((ans, i) => ans === testWords[i].toLowerCase()).length} / {testWords.length}
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     <button
-                      onClick={() => setTestState('start')}
-                      className="px-8 py-4 bg-gray-900 text-white text-lg font-bold rounded-2xl hover:bg-gray-800 transition-colors shadow-lg"
+                      onClick={evaluateArenaSentence}
+                      disabled={arenaLoading || !arenaInput.trim()}
+                      className="w-full py-4 bg-indigo-600 rounded-2xl font-black text-lg hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                     >
-                      Take Another Test
+                      {arenaLoading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Sword className="w-6 h-6" />}
+                      {arenaLoading ? "Attacking..." : "Attack"}
                     </button>
                   </div>
-                </>
+                </div>
+              )}
+
+              {arenaState === 'result' && (
+                <div className="animate-in zoom-in duration-500">
+                  <Trophy className="w-32 h-32 text-yellow-500 mx-auto mb-6 drop-shadow-[0_0_30px_rgba(234,179,8,0.5)]" />
+                  <h2 className="text-5xl font-black mb-4">VICTORY!</h2>
+                  <p className="text-slate-400 mb-8 text-lg">You destroyed the Grammar Monster and earned 500 XP!</p>
+                  <button
+                    onClick={() => {
+                      setArenaState('idle');
+                    }}
+                    className="px-8 py-4 bg-indigo-600 rounded-2xl font-black text-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20"
+                  >
+                    Play Again
+                  </button>
+                </div>
               )}
             </div>
           </div>
         )}
 
-          {activeTab === 'profile' && (
+        {activeTab === 'profile' && (
           <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50/50">
             <div className="max-w-3xl mx-auto space-y-8 pb-10">
               
@@ -4042,9 +4012,7 @@ function App() {
                           transition={{ delay: i * 0.1 }}
                           className={`flex items-center gap-4 p-3.5 rounded-2xl border transition-all ${user?.displayName === u.name ? 'bg-indigo-600/30 border-indigo-400/50' : 'bg-white/5 border-white/5'}`}
                         >
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-base shrink-0 ${i === 0 ? 'bg-amber-400 text-slate-900 shadow-lg shadow-amber-400/20' : i === 1 ? 'bg-slate-300 text-slate-900 shadow-lg shadow-slate-400/20' : i === 2 ? 'bg-orange-400 text-slate-900 shadow-lg shadow-orange-400/20' : 'bg-white/10 text-white'}`}>
-                             {i + 1}
-                          </div>
+                          {/* Rank number removed as requested */}
                           <div className="w-10 h-10 rounded-xl overflow-hidden bg-white/10 border border-white/10 shrink-0 flex items-center justify-center">
                              {u.photoURL ? (
                                <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
