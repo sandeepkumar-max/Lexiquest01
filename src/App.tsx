@@ -3934,7 +3934,17 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                             onKeyDown={(e) => e.key === 'Enter' && evaluateArenaSentence()}
                           />
                           <button
-                            onClick={() => setArenaInput(arenaWordObj?.example || "This is a great word.")}
+                            onClick={() => {
+                              if (arenaWordObj && (arenaWordObj as any).example) {
+                                const word = (arenaWordObj as any).word;
+                                const example = (arenaWordObj as any).example;
+                                const hint = example.replace(new RegExp(word, 'gi'), '_____');
+                                Dialog.alert({
+                                  title: 'Lexi Hint 🤖',
+                                  message: `Think of a context like this:\n"${hint}"`,
+                                });
+                              }
+                            }}
                             title="Lexi Hint"
                             className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/40 hover:text-white rounded-lg flex items-center justify-center transition-all"
                           >
