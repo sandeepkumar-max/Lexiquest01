@@ -259,6 +259,7 @@ function App() {
 
   // Arena State
   const [arenaState, setArenaState] = useState<'idle' | 'battling' | 'result'>('idle');
+  const [showClassicTest, setShowClassicTest] = useState(false);
   const [arenaHp, setArenaHp] = useState(100);
   const [arenaWordObj, setArenaWordObj] = useState<{word: string, meaning: string} | null>(null);
   const [arenaInput, setArenaInput] = useState('');
@@ -3594,38 +3595,280 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
           </div>
         )}
         {activeTab === 'test' && (
-          <div className="flex-1 p-6 lg:p-10 overflow-y-auto bg-slate-900 text-white relative">
+          <div className={`flex-1 p-6 lg:p-10 overflow-y-auto relative transition-colors duration-500 ${showClassicTest && testState !== 'start' ? 'bg-slate-50' : 'bg-slate-900 text-white'}`}>
             <div className="max-w-2xl mx-auto text-center mt-10">
-              {arenaState === 'idle' && (
+              
+              {/* --- TEST HUB --- */}
+              {arenaState === 'idle' && !showClassicTest && (
                 <div className="animate-in fade-in zoom-in duration-500">
-                  <Flame className="w-24 h-24 text-orange-500 mx-auto mb-6 animate-pulse" />
-                  <h2 className="text-4xl font-black mb-4">Welcome to the Arena</h2>
-                  <p className="text-slate-400 mb-8 max-w-sm mx-auto text-lg">
-                    Defeat the grammar monster by using vocabulary words correctly in a sentence.
+                  <div className="relative inline-block mb-6">
+                    <div className="absolute inset-0 bg-orange-500/20 rounded-full blur-2xl animate-pulse" />
+                    <Trophy className="w-24 h-24 text-amber-400 relative z-10 drop-shadow-[0_0_15px_rgba(251,191,36,0.4)]" />
+                  </div>
+                  <h2 className="text-4xl font-black mb-4 tracking-tight">Training Center</h2>
+                  <p className="text-slate-400 mb-10 max-w-sm mx-auto text-lg font-medium">
+                    Choose your challenge. Master vocabulary through combat or precision testing.
                   </p>
-                  <div className="flex flex-col gap-4 max-w-sm mx-auto w-full">
-                    <button
+                  
+                  <div className="flex flex-col gap-5 max-w-sm mx-auto w-full">
+                    <motion.button
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
                       onClick={startArenaBattle}
-                      className="w-full py-5 bg-orange-600 text-white text-xl font-black rounded-3xl shadow-lg shadow-orange-500/20 hover:scale-[1.02] active:scale-95 transition-all flex flex-col items-center justify-center gap-1 border-b-4 border-orange-800 relative overflow-hidden group"
+                      className="w-full py-6 bg-gradient-to-br from-orange-500 to-red-600 text-white rounded-[2.5rem] shadow-xl shadow-orange-900/20 flex flex-col items-center justify-center gap-1 border-b-4 border-orange-800 relative overflow-hidden group"
                     >
                       <div className="absolute inset-0 bg-white/20 w-full h-full -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
-                      <span className="flex items-center gap-2"><Flame className="w-6 h-6" /> Boss Battle</span>
-                      <span className="text-[10px] font-bold text-orange-200 uppercase tracking-widest">Sentence Striker</span>
-                    </button>
+                      <span className="flex items-center gap-2 text-xl font-black"><Flame className="w-6 h-6" /> Boss Battle</span>
+                      <span className="text-[10px] font-bold text-orange-100 uppercase tracking-[0.2em]">Sentence Striker Mode</span>
+                    </motion.button>
+                    
+                    <motion.button
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setShowClassicTest(true)}
+                      className="w-full py-6 bg-gradient-to-br from-indigo-600 to-purple-700 text-white rounded-[2.5rem] shadow-xl shadow-indigo-900/20 flex flex-col items-center justify-center gap-1 border-b-4 border-indigo-900 relative overflow-hidden group"
+                    >
+                      <div className="absolute inset-0 bg-white/20 w-full h-full -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
+                      <span className="flex items-center gap-2 text-xl font-black"><GraduationCap className="w-6 h-6" /> Spelling Test</span>
+                      <span className="text-[10px] font-bold text-indigo-100 uppercase tracking-[0.2em]">Classic Mastery Mode</span>
+                    </motion.button>
                     
                     <button
-                      onClick={() => alert("Speed Sprint mode coming in next update!")}
-                      className="w-full py-5 bg-indigo-600 text-white text-xl font-black rounded-3xl shadow-lg shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 transition-all flex flex-col items-center justify-center gap-1 border-b-4 border-indigo-800"
+                      disabled
+                      className="w-full py-5 bg-slate-800/50 text-slate-500 rounded-[2.5rem] border-2 border-slate-700/50 flex flex-col items-center justify-center gap-1 opacity-50 cursor-not-allowed"
                     >
-                      <span className="flex items-center gap-2"><Zap className="w-6 h-6" /> Speed Sprint</span>
-                      <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">MCQ Survival (Coming Soon)</span>
+                      <span className="flex items-center gap-2 text-lg font-black"><Zap className="w-5 h-5" /> Speed Sprint</span>
+                      <span className="text-[9px] font-bold uppercase tracking-widest">Coming Soon</span>
                     </button>
                   </div>
                 </div>
               )}
 
-              {arenaState === 'battling' && arenaWordObj && (
-                <div className="animate-in fade-in slide-in-from-bottom-8">
+              {/* --- CLASSIC SPELLING TEST --- */}
+              {showClassicTest && (
+                <div className={`animate-in fade-in slide-in-from-bottom-8 duration-500 w-full`}>
+                  {testState === 'start' && (
+                    <div className="bg-white text-slate-900 rounded-[3rem] p-10 shadow-2xl border border-slate-100">
+                      <button 
+                        onClick={() => setShowClassicTest(false)}
+                        className="absolute top-6 left-6 p-3 bg-slate-100 text-slate-500 rounded-2xl hover:bg-slate-200 transition-all active:scale-95"
+                      >
+                        <ChevronLeft className="w-5 h-5" />
+                      </button>
+                      
+                      <div className="w-20 h-20 bg-indigo-50 rounded-[2rem] flex items-center justify-center text-indigo-600 mx-auto mb-6">
+                        <GraduationCap className="w-10 h-10" />
+                      </div>
+                      <h2 className="text-3xl font-black mb-3 text-slate-900">Vocabulary Mastery</h2>
+                      <p className="text-slate-500 mb-10 text-sm font-medium px-4">
+                        Test your knowledge of the words you've learned. Choose your difficulty level and mode.
+                      </p>
+
+                      <div className="mb-10">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Set Difficulty</p>
+                        <div className="flex bg-slate-100 p-1.5 rounded-[1.5rem] max-w-xs mx-auto border border-slate-200">
+                          {(['easy', 'medium', 'hard'] as const).map((d) => (
+                            <button
+                              key={d}
+                              onClick={() => setTestDifficulty(d)}
+                              className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${testDifficulty === d ? 'bg-white text-indigo-600 shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              {d}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <button
+                          onClick={() => startTest('listen-mcq')}
+                          className="p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-3 group"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm group-hover:scale-110 transition-transform">
+                            <Volume2 className="w-6 h-6" />
+                          </div>
+                          <span className="font-black text-slate-900">Listen & Choose</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => startTest('listen-type')}
+                          className="p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-3 group"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm group-hover:scale-110 transition-transform">
+                            <PenTool className="w-6 h-6" />
+                          </div>
+                          <span className="font-black text-slate-900">Listen & Type</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => startTest('visual-mcq')}
+                          className="p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl hover:border-indigo-500 hover:bg-indigo-50 transition-all flex flex-col items-center gap-3 group"
+                        >
+                          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm group-hover:scale-110 transition-transform">
+                            <Book className="w-6 h-6" />
+                          </div>
+                          <span className="font-black text-slate-900">Visual MCQ</span>
+                        </button>
+                        
+                        <button
+                          onClick={() => {
+                            if (hasPremium) startTest('meaning-mcq');
+                            else setSubscriptionModalOpen(true);
+                          }}
+                          className={`p-6 border-2 rounded-3xl transition-all flex flex-col items-center gap-3 group relative ${hasPremium ? 'bg-slate-50 border-slate-100 hover:border-indigo-500 hover:bg-indigo-50' : 'bg-slate-50/50 border-slate-50 opacity-80'}`}
+                        >
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${hasPremium ? 'bg-white text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                            <Sparkles className="w-6 h-6" />
+                          </div>
+                          <span className="font-black text-slate-900">Context King</span>
+                          {!hasPremium && <Lock className="w-3 h-3 absolute top-3 right-3 text-slate-300" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {testState === 'testing' && (
+                    <div className="bg-white text-slate-900 rounded-[3rem] p-8 shadow-2xl border border-slate-100">
+                      <div className="flex justify-between items-center mb-8">
+                        <button
+                          onClick={async () => {
+                            const { value } = await Dialog.confirm({
+                              title: 'Exit Test?',
+                              message: 'Progress will be lost. Exit anyway?',
+                              okButtonTitle: 'Yes, Exit',
+                              cancelButtonTitle: 'Stay'
+                            });
+                            if (value) {
+                              setTestState('start');
+                              setShowClassicTest(false);
+                            }
+                          }}
+                          className="flex items-center gap-1.5 text-slate-400 hover:text-rose-500 transition-colors font-black text-[10px] uppercase tracking-widest"
+                        >
+                          <ChevronLeft className="w-4 h-4" /> Exit
+                        </button>
+                        <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1.5 rounded-lg">
+                          Word {currentTestWordIndex + 1} / {testWords.length}
+                        </span>
+                      </div>
+
+                      {/* Timer Bar */}
+                      <div className="w-full h-2 bg-slate-100 rounded-full mb-10 overflow-hidden">
+                        <motion.div
+                          animate={{ width: `${(timeLeft / 15) * 100}%` }}
+                          transition={{ duration: 1, ease: 'linear' }}
+                          className={`h-full ${timeLeft < 5 ? 'bg-rose-500' : 'bg-indigo-600'}`}
+                        />
+                      </div>
+
+                      {testMode !== 'visual-mcq' && (
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => playWord(testWords[currentTestWordIndex])}
+                          className="w-24 h-24 bg-indigo-600 text-white rounded-[2rem] flex items-center justify-center mx-auto mb-10 shadow-xl shadow-indigo-200"
+                        >
+                          <Volume2 className="w-10 h-10" />
+                        </motion.button>
+                      )}
+
+                      {testMode === 'meaning-mcq' && (
+                        <div className="mb-10 p-6 bg-slate-50 rounded-3xl border border-slate-100 text-center animate-in zoom-in">
+                          {(() => {
+                            const wordObj = allLearnWords.find(w => w.word.toLowerCase() === testWords[currentTestWordIndex]?.toLowerCase());
+                            if (!wordObj) return null;
+                            return (
+                              <div className="space-y-4">
+                                <p className="text-3xl font-black text-slate-900">{wordObj.meaning}</p>
+                                <div className="h-px bg-slate-200 w-12 mx-auto" />
+                                <p className="text-lg font-medium text-slate-600 italic">"{wordObj.example.replace(new RegExp(wordObj.word, 'gi'), '_____')}"</p>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+
+                      {testMode === 'listen-type' ? (
+                        <div className="max-w-sm mx-auto space-y-6">
+                          <input
+                            type="text"
+                            value={typedAnswer}
+                            onChange={e => setTypedAnswer(e.target.value)}
+                            className="w-full p-6 bg-slate-50 border-2 border-slate-100 rounded-3xl text-2xl font-black text-center outline-none focus:border-indigo-500 transition-all"
+                            placeholder="Type what you hear..."
+                            autoFocus
+                            onKeyDown={e => e.key === 'Enter' && handleAnswerSubmit(typedAnswer)}
+                          />
+                          <button
+                            onClick={() => handleAnswerSubmit(typedAnswer)}
+                            className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-lg shadow-xl active:scale-95 transition-all"
+                          >
+                            Check Answer
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto">
+                          {mcqOptions[currentTestWordIndex]?.map((opt, i) => (
+                            <button
+                              key={i}
+                              onClick={() => handleAnswerSubmit(opt)}
+                              className="p-5 bg-white border-2 border-slate-100 rounded-2xl font-bold text-slate-700 hover:border-indigo-500 hover:bg-indigo-50 transition-all active:scale-95 text-lg"
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {feedbackState !== 'none' && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`mt-8 p-6 rounded-3xl flex items-center justify-center gap-3 ${feedbackState === 'correct' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}
+                        >
+                          {feedbackState === 'correct' ? <CheckCircle className="w-6 h-6" /> : <X className="w-6 h-6" />}
+                          <span className="text-xl font-black">{feedbackState === 'correct' ? 'Excellent!' : feedbackState === 'timeout' ? 'Time Out!' : 'Incorrect'}</span>
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+
+                  {testState === 'results' && (
+                    <div className="bg-white text-slate-900 rounded-[3rem] p-10 shadow-2xl border border-slate-100 text-center">
+                      <div className="w-24 h-24 bg-amber-50 rounded-[2.5rem] flex items-center justify-center text-amber-500 mx-auto mb-6 shadow-inner">
+                        <Trophy className="w-12 h-12" />
+                      </div>
+                      <h2 className="text-4xl font-black mb-2">Test Complete!</h2>
+                      <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mb-10">You've leveled up your skills</p>
+                      
+                      <div className="grid grid-cols-2 gap-4 mb-10">
+                        <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                           <p className="text-3xl font-black text-indigo-600">{userAnswers.filter((ans, i) => ans.toLowerCase() === testWords[i].toLowerCase()).length}</p>
+                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Correct</p>
+                        </div>
+                        <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                           <p className="text-3xl font-black text-slate-900">+{userAnswers.filter((ans, i) => ans.toLowerCase() === testWords[i].toLowerCase()).length * 10} XP</p>
+                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gained</p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setTestState('start');
+                          setShowClassicTest(false);
+                        }}
+                        className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xl shadow-xl hover:bg-indigo-600 transition-all active:scale-95"
+                      >
+                        Finish Review
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* --- BOSS BATTLE (ARENA) --- */}
+              {arenaState !== 'idle' && (
+                <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
                   {/* Exit/Flee Header */}
                   <div className="flex justify-between items-center mb-6">
                     <button 
@@ -3637,89 +3880,92 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                     </button>
                     <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest bg-orange-500/10 px-3 py-1.5 rounded-lg border border-orange-500/20 flex items-center gap-1"><Flame className="w-3 h-3"/> Boss Battle</span>
                   </div>
-                  {/* Monster UI */}
-                  <div className="relative w-48 h-48 mx-auto mb-8">
-                    <div className="absolute inset-0 bg-red-500/20 rounded-full blur-3xl animate-pulse" />
-                    <img 
-                      src="https://api.dicebear.com/7.x/bottts/svg?seed=Monster&backgroundColor=transparent" 
-                      alt="Monster" 
-                      className={`w-full h-full object-contain relative z-10 transition-transform duration-300 ${arenaFeedback ? 'scale-90 opacity-80' : 'animate-bounce'}`} 
-                    />
-                    
-                    {/* HP Bar */}
-                    <div className="absolute -bottom-6 w-full bg-slate-800 rounded-full h-4 border border-slate-700 overflow-hidden">
-                      <div 
-                        className="h-full bg-red-500 transition-all duration-500" 
-                        style={{ width: `${arenaHp}%` }}
-                      />
-                    </div>
-                    <div className="absolute -bottom-6 w-full text-center text-[10px] font-black">{arenaHp}/100 HP</div>
-                  </div>
+                  
+                  {arenaState === 'battling' && arenaWordObj && (
+                    <>
+                      {/* Monster UI */}
+                      <div className="relative w-48 h-48 mx-auto mb-8">
+                        <div className="absolute inset-0 bg-red-500/20 rounded-full blur-3xl animate-pulse" />
+                        <img 
+                          src="https://api.dicebear.com/7.x/bottts/svg?seed=Monster&backgroundColor=transparent" 
+                          alt="Monster" 
+                          className={`w-full h-full object-contain relative z-10 transition-transform duration-300 ${arenaFeedback ? 'scale-90 opacity-80' : 'animate-bounce'}`} 
+                        />
+                        
+                        {/* HP Bar */}
+                        <div className="absolute -bottom-6 w-full bg-slate-800 rounded-full h-4 border border-slate-700 overflow-hidden">
+                          <div 
+                            className="h-full bg-red-500 transition-all duration-500" 
+                            style={{ width: `${arenaHp}%` }}
+                          />
+                        </div>
+                        <div className="absolute -bottom-6 w-full text-center text-[10px] font-black">{arenaHp}/100 HP</div>
+                      </div>
 
-                  {/* Feedback Overlay */}
-                  {arenaFeedback && (
-                     <div className="mb-6 p-4 rounded-xl border animate-in slide-in-from-top-4 bg-slate-800/80 border-slate-700 backdrop-blur-sm">
-                        <h4 className={`text-2xl font-black mb-1 ${arenaFeedback.crit ? 'text-orange-500' : 'text-slate-300'}`}>
-                          -{arenaFeedback.damage} DAMAGE {arenaFeedback.crit && "CRITICAL HIT!"}
-                        </h4>
-                        <p className="text-slate-400 text-sm">{arenaFeedback.msg}</p>
-                     </div>
+                      {/* Feedback Overlay */}
+                      {arenaFeedback && (
+                         <div className="mb-6 p-4 rounded-xl border animate-in slide-in-from-top-4 bg-slate-800/80 border-slate-700 backdrop-blur-sm">
+                            <h4 className={`text-2xl font-black mb-1 ${arenaFeedback.crit ? 'text-orange-500' : 'text-slate-300'}`}>
+                              -{arenaFeedback.damage} DAMAGE {arenaFeedback.crit && "CRITICAL HIT!"}
+                            </h4>
+                            <p className="text-slate-400 text-sm">{arenaFeedback.msg}</p>
+                         </div>
+                      )}
+
+                      {/* Weapon (Word) */}
+                      <div className="mb-8">
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-2">Your Weapon</p>
+                        <div className="inline-block px-6 py-3 bg-slate-800 border-2 border-slate-600 rounded-2xl">
+                          <span className="text-2xl font-black text-indigo-400">{arenaWordObj.word}</span>
+                        </div>
+                        <p className="text-sm text-slate-500 mt-2 italic">{arenaWordObj.meaning}</p>
+                      </div>
+
+                      {/* Input */}
+                      <div className="flex flex-col gap-4">
+                        <div className="relative">
+                          <input
+                            type="text"
+                            disabled={arenaLoading}
+                            value={arenaInput}
+                            onChange={(e) => setArenaInput(e.target.value)}
+                            placeholder="Type a sentence using the word..."
+                            className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl pl-6 pr-14 py-4 text-lg text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-colors"
+                            onKeyDown={(e) => e.key === 'Enter' && evaluateArenaSentence()}
+                          />
+                          <button
+                            onClick={() => setArenaInput(arenaWordObj?.example || "This is a great word.")}
+                            title="Lexi Hint"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/40 hover:text-white rounded-lg flex items-center justify-center transition-all"
+                          >
+                            <Bot className="w-5 h-5" />
+                          </button>
+                        </div>
+                        <button
+                          onClick={evaluateArenaSentence}
+                          disabled={arenaLoading || !arenaInput.trim()}
+                          className="w-full py-4 bg-indigo-600 rounded-2xl font-black text-lg hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {arenaLoading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Sword className="w-6 h-6" />}
+                          {arenaLoading ? "Attacking..." : "Attack"}
+                        </button>
+                      </div>
+                    </>
                   )}
 
-                  {/* Weapon (Word) */}
-                  <div className="mb-8">
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-2">Your Weapon</p>
-                    <div className="inline-block px-6 py-3 bg-slate-800 border-2 border-slate-600 rounded-2xl">
-                      <span className="text-2xl font-black text-indigo-400">{arenaWordObj.word}</span>
-                    </div>
-                    <p className="text-sm text-slate-500 mt-2 italic">{arenaWordObj.meaning}</p>
-                  </div>
-
-                  {/* Input */}
-                  <div className="flex flex-col gap-4">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        disabled={arenaLoading}
-                        value={arenaInput}
-                        onChange={(e) => setArenaInput(e.target.value)}
-                        placeholder="Type a sentence using the word..."
-                        className="w-full bg-slate-800 border-2 border-slate-700 rounded-2xl pl-6 pr-14 py-4 text-lg text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none transition-colors"
-                        onKeyDown={(e) => e.key === 'Enter' && evaluateArenaSentence()}
-                      />
+                  {arenaState === 'result' && (
+                    <div className="animate-in zoom-in duration-500 py-10">
+                      <Trophy className="w-32 h-32 text-yellow-500 mx-auto mb-6 drop-shadow-[0_0_30px_rgba(234,179,8,0.5)]" />
+                      <h2 className="text-5xl font-black mb-4">VICTORY!</h2>
+                      <p className="text-slate-400 mb-8 text-lg">You destroyed the Grammar Monster and earned 500 XP!</p>
                       <button
-                        onClick={() => setArenaInput(arenaWordObj?.example || "This is a great word.")}
-                        title="Lexi Hint"
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/40 hover:text-white rounded-lg flex items-center justify-center transition-all"
+                        onClick={() => setArenaState('idle')}
+                        className="px-8 py-4 bg-indigo-600 rounded-2xl font-black text-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20"
                       >
-                        <Bot className="w-5 h-5" />
+                        Play Again
                       </button>
                     </div>
-                    <button
-                      onClick={evaluateArenaSentence}
-                      disabled={arenaLoading || !arenaInput.trim()}
-                      className="w-full py-4 bg-indigo-600 rounded-2xl font-black text-lg hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {arenaLoading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Sword className="w-6 h-6" />}
-                      {arenaLoading ? "Attacking..." : "Attack"}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {arenaState === 'result' && (
-                <div className="animate-in zoom-in duration-500">
-                  <Trophy className="w-32 h-32 text-yellow-500 mx-auto mb-6 drop-shadow-[0_0_30px_rgba(234,179,8,0.5)]" />
-                  <h2 className="text-5xl font-black mb-4">VICTORY!</h2>
-                  <p className="text-slate-400 mb-8 text-lg">You destroyed the Grammar Monster and earned 500 XP!</p>
-                  <button
-                    onClick={() => {
-                      setArenaState('idle');
-                    }}
-                    className="px-8 py-4 bg-indigo-600 rounded-2xl font-black text-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20"
-                  >
-                    Play Again
-                  </button>
+                  )}
                 </div>
               )}
             </div>

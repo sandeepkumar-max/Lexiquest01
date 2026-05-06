@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "78991956591-deiljjk611nkkaa1l6781oj338nbd4v0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.lexiquest.app",
+            "certificate_hash": "c683aee24d0fd9d4f27ca27aab0160cc9ac27211"
+          }
+        },
+        {
           "client_id": "78991956591-ipi7setrnj4tuqhseqlk4v3bdpe8mkm8.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
