@@ -63,7 +63,9 @@ body.dark-mode .bg-slate-50 {
 
 body.dark-mode .text-slate-900,
 body.dark-mode .text-gray-900,
-body.dark-mode .text-slate-800 {
+body.dark-mode .text-slate-800,
+body.dark-mode .text-slate-700,
+body.dark-mode .text-gray-700 {
   color: var(--text-main) !important;
 }
 

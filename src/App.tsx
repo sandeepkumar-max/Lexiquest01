@@ -428,7 +428,7 @@ function App() {
     } else if (selectedCategory === 'Review Needed') {
       const now = Date.now();
       combined = combined.filter(w => {
-        const data = srsData[w.word.toLowerCase()];
+        const data = srsData[(w.word || '').toLowerCase()];
         return data && data.nextReview <= now;
       });
     } else if (selectedCategory !== 'All') {
@@ -437,13 +437,25 @@ function App() {
 
     if (learnSearchQuery.trim()) {
       combined = combined.filter(w =>
-        w.word.toLowerCase().includes(learnSearchQuery.toLowerCase()) ||
-        (w.meaning && w.meaning.toLowerCase().includes(learnSearchQuery.toLowerCase()))
+        (w.word || '').toLowerCase().includes((learnSearchQuery || '').toLowerCase()) ||
+        (w.meaning && w.meaning.toLowerCase().includes((learnSearchQuery || '').toLowerCase()))
       );
     }
 
     return combined;
   }, [customWords, sharedWords, aiWords, learnSearchQuery, selectedCategory, dailyLearnWords, srsData]);
+
+  const completeWordPool = useMemo(() => {
+    let combined = [...LEARN_WORDS, ...customWords, ...sharedWords, ...aiWords];
+    const seen = new Set<string>();
+    return combined.filter(w => {
+      if (!w || !w.word) return false;
+      const lower = w.word.toLowerCase().trim();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+  }, [customWords, sharedWords, aiWords]);
   const totalLearnPages = Math.ceil(allLearnWords.length / wordsPerPage);
   const currentLearnWords = allLearnWords.slice(learnPage * wordsPerPage, (learnPage + 1) * wordsPerPage);
   const [expandedWord, setExpandedWord] = useState<string | null>(null);
@@ -860,9 +872,9 @@ function App() {
         if (voices && voices.length > 0) {
           setAvailableVoices(voices);
           // Automatically pick a "Premium" sounding voice if not already selected
-          const preferred = voices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) 
-                         || voices.find(v => v.lang.startsWith('en-GB'))
-                         || voices.find(v => v.lang.startsWith('en-US'))
+          const preferred = voices.find(v => (v.name || '').includes('Google') && (v.lang || '').startsWith('en')) 
+                         || voices.find(v => (v.lang || '').startsWith('en-GB'))
+                         || voices.find(v => (v.lang || '').startsWith('en-US'))
                          || voices[0];
           if (preferred && !localStorage.getItem('selectedVoiceURI')) {
             setSelectedVoiceURI(preferred.voiceURI);
@@ -1508,8 +1520,8 @@ function App() {
           const validWords = parsed.words.filter((w: any) => w.word && w.meaning && w.example);
           if (validWords.length > 0) {
             setAiWords(prev => {
-              const existingWordSet = new Set(prev.map((w: any) => w.word.toLowerCase()));
-              const newUnique = validWords.filter((w: any) => !existingWordSet.has(w.word.toLowerCase()));
+              const existingWordSet = new Set(prev.map((w: any) => (w.word || '').toLowerCase()));
+              const newUnique = validWords.filter((w: any) => !existingWordSet.has((w.word || '').toLowerCase()));
               const updated = [...prev, ...newUnique];
               localStorage.setItem('cached_ai_words', JSON.stringify(updated));
               
@@ -1771,8 +1783,8 @@ function App() {
         try {
           const result = await TextToSpeech.getSupportedVoices();
           // Filter for Indian English voices (en-IN)
-          const enInVoices = (result.voices || []).filter(v => v.lang.startsWith('en-IN'));
-          const otherEnVoices = (result.voices || []).filter(v => v.lang.startsWith('en-') && !v.lang.startsWith('en-IN'));
+          const enInVoices = (result.voices || []).filter(v => v.lang?.startsWith('en-IN'));
+          const otherEnVoices = (result.voices || []).filter(v => v.lang?.startsWith('en-') && !v.lang?.startsWith('en-IN'));
           
           // Combine prioritizing en-IN
           const allEnVoices = [...enInVoices, ...otherEnVoices];
@@ -1782,9 +1794,9 @@ function App() {
             if (prev) return prev;
             // Enhanced priority: Google/Enhanced > Indian Female > Others
             const bestVoice = 
-              enInVoices.find(v => v.name.toLowerCase().includes('google') || v.name.toLowerCase().includes('enhanced')) ||
-              enInVoices.find(v => v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('aditi')) ||
-              otherEnVoices.find(v => v.name.toLowerCase().includes('google') || v.name.toLowerCase().includes('enhanced')) ||
+              enInVoices.find(v => (v.name || '').toLowerCase().includes('google') || (v.name || '').toLowerCase().includes('enhanced')) ||
+              enInVoices.find(v => (v.name || '').toLowerCase().includes('female') || (v.name || '').toLowerCase().includes('aditi')) ||
+              otherEnVoices.find(v => (v.name || '').toLowerCase().includes('google') || (v.name || '').toLowerCase().includes('enhanced')) ||
               enInVoices[0] ||
               otherEnVoices[0];
             return bestVoice ? bestVoice.voiceURI : '';
@@ -1974,11 +1986,12 @@ function App() {
     setTestMode(mode);
 
     // Combine all sources: Default, Custom (Local), and Shared (Global)
-    const allSources = [...LEARN_WORDS, ...customWords, ...sharedWords];
+    const allSources = [...LEARN_WORDS, ...customWords, ...sharedWords, ...aiWords];
 
     // Ensure uniqueness by word (case-insensitive)
     const uniqueMap = new Map();
     allSources.forEach(item => {
+      if (!item || !item.word) return;
       const key = item.word.toLowerCase();
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, item);
@@ -2059,7 +2072,7 @@ function App() {
     setUserAnswers(newAnswers);
 
     // Update SRS Data (Incorrect/Timeout)
-    const wordKey = testWords[currentTestWordIndex].toLowerCase();
+    const wordKey = (testWords[currentTestWordIndex] || '').toLowerCase();
     setSrsData(prev => {
       const current = prev[wordKey] || { level: 0, nextReview: 0 };
       let newLevel = Math.max(0, current.level - 1);
@@ -2072,14 +2085,15 @@ function App() {
   };
 
   const playNative = async (word: string) => {
+    if (!word) { setIsLexiSpeaking(false); return; }
     try {
       if (Capacitor.isNativePlatform()) {
         const vIdx = availableVoices.findIndex(v => v.voiceURI === selectedVoiceURI);
-        await TextToSpeech.stop();
+        try { await TextToSpeech.stop(); } catch(_) {}
         await TextToSpeech.speak({
           text: word,
           lang: 'en-US',
-          rate: speechRate,
+          rate: speechRate || 1.0,
           pitch: 1.0,
           volume: 1.0,
           category: 'ambient',
@@ -2087,19 +2101,19 @@ function App() {
         });
         
         // Safety timeout to reset speaking state if native fails
-        const wordCount = word.split(' ').length;
-        const estTime = Math.max(1500, (wordCount / (150 * speechRate)) * 60 * 1000 + 1000);
+        const wordCount = (word || '').split(' ').length;
+        const estTime = Math.max(1500, (wordCount / (150 * (speechRate || 1))) * 60 * 1000 + 1000);
         setTimeout(() => setIsLexiSpeaking(false), estTime);
       } else {
-        if (!window.speechSynthesis) {
+        if (typeof window === 'undefined' || !window.speechSynthesis) {
           setIsLexiSpeaking(false);
           return;
         }
-        window.speechSynthesis.cancel();
+        try { window.speechSynthesis.cancel(); } catch(_) {}
         const utterance = new SpeechSynthesisUtterance(word);
         const voice = availableVoices.find(v => v.voiceURI === selectedVoiceURI);
         if (voice) utterance.voice = voice;
-        utterance.rate = speechRate;
+        utterance.rate = speechRate || 1.0;
         utterance.onend = () => setIsLexiSpeaking(false);
         utterance.onerror = () => setIsLexiSpeaking(false);
         window.speechSynthesis.speak(utterance);
@@ -2111,8 +2125,11 @@ function App() {
   };
 
   const playWord = async (word: string) => {
-    if (!word) return;
+    if (!word || typeof word !== 'string') { setIsLexiSpeaking(false); return; }
     setIsLexiSpeaking(true);
+
+    // Global safety timeout — auto-reset speaking state after 15s to prevent UI freeze
+    const safetyTimer = setTimeout(() => setIsLexiSpeaking(false), 15000);
 
     // Try Natural Neural Voice (ElevenLabs) first if online (limit to 300 chars for API safety)
     if (!isOffline && word.length < 300) {
@@ -2140,10 +2157,12 @@ function App() {
         const audio = new Audio(url);
 
         audio.onended = () => {
+          clearTimeout(safetyTimer);
           setIsLexiSpeaking(false);
           URL.revokeObjectURL(url);
         };
         audio.onerror = () => {
+          clearTimeout(safetyTimer);
           console.warn("ElevenLabs voice failed, using native fallback");
           URL.revokeObjectURL(url);
           playNative(word);
@@ -2185,13 +2204,14 @@ function App() {
         });
 
         SpeechRecognition.addListener('partialResults' as any, (data: any) => {
-          const match = data.matches.some((m: string) => m.toLowerCase().includes(word.toLowerCase()));
+          if (!data?.matches || data.matches.length === 0) { setIsPronouncing(null); SpeechRecognition.removeAllListeners(); return; }
+          const match = data.matches.some((m: string) => (m || '').toLowerCase().includes((word || '').toLowerCase()));
           if (match) {
             setAlertMessage(`Perfect! You said it correctly: "${word}" 🌟`);
             addXp(10);
             if (soundEnabled) correctSound.play().catch(() => {});
           } else {
-            setAlertMessage(`Almost! Try again. You said: "${data.matches[0]}"`);
+            setAlertMessage(`Almost! Try again. You said: "${data.matches[0] || ''}"`);
             if (soundEnabled) wrongSound.play().catch(() => {});
           }
           setIsPronouncing(null);
@@ -2208,8 +2228,8 @@ function App() {
         recognition.lang = 'en-US';
         recognition.start();
         recognition.onresult = (event: any) => {
-          const transcript = event.results[0][0].transcript.toLowerCase();
-          if (transcript.includes(word.toLowerCase())) {
+          const transcript = (event?.results?.[0]?.[0]?.transcript || '').toLowerCase();
+          if (transcript.includes((word || '').toLowerCase())) {
             setAlertMessage(`Excellent! Correct pronunciation: "${word}" ✨`);
             addXp(10);
             if (soundEnabled) correctSound.play().catch(() => {});
@@ -2231,13 +2251,13 @@ function App() {
     if (timerRef.current) clearInterval(timerRef.current);
     if (!testWords || !testWords[currentTestWordIndex]) return; // Safeguard against crash
 
-    const newAnswers = [...userAnswers, answer.toLowerCase()];
+    const newAnswers = [...userAnswers, (answer || '').toLowerCase()];
     setUserAnswers(newAnswers);
 
-    const isCorrect = answer.toLowerCase() === testWords[currentTestWordIndex].toLowerCase();
+    const isCorrect = (answer || '').toLowerCase() === (testWords[currentTestWordIndex] || '').toLowerCase();
 
     // Update SRS Data
-    const wordKey = testWords[currentTestWordIndex].toLowerCase();
+    const wordKey = (testWords[currentTestWordIndex] || '').toLowerCase();
     setSrsData(prev => {
       const current = prev[wordKey] || { level: 0, nextReview: 0 };
       let newLevel = isCorrect ? current.level + 1 : Math.max(0, current.level - 1);
@@ -2276,7 +2296,7 @@ function App() {
 
   useEffect(() => {
     if (testState === 'results' && userAnswers.length > 0 && testWords.length > 0) {
-      const correctCount = userAnswers.filter((ans, i) => ans === testWords[i]?.toLowerCase()).length;
+      const correctCount = userAnswers.filter((ans, i) => ans === (testWords[i] || '').toLowerCase()).length;
       const score = (correctCount / testWords.length) * 100;
 
       setTotalTestsTaken(prev => {
@@ -2366,7 +2386,7 @@ function App() {
 
       const data = await response.json();
       const feedback = data.choices?.[0]?.message?.content || "Could not analyze.";
-      const isCorrect = !feedback.toLowerCase().includes('incorrect') && !feedback.toLowerCase().includes('wrong') && !feedback.toLowerCase().includes('mistake');
+      const isCorrect = !(feedback || '').toLowerCase().includes('incorrect') && !(feedback || '').toLowerCase().includes('wrong') && !(feedback || '').toLowerCase().includes('mistake');
       
       setRuleLabFeedback(prev => ({ 
         ...prev, 
@@ -2435,9 +2455,9 @@ function App() {
       }
     } catch (err: any) {
       // Local Fallback Logic
-      const localMatch = LEARN_WORDS.find(w => w.word.toLowerCase() === query) ||
-                         sharedWords.find(w => w.word.toLowerCase() === query) ||
-                         aiWords.find(w => w.word.toLowerCase() === query);
+      const localMatch = LEARN_WORDS.find(w => (w.word || '').toLowerCase() === query) ||
+                         sharedWords.find(w => (w.word || '').toLowerCase() === query) ||
+                         aiWords.find(w => (w.word || '').toLowerCase() === query);
                          
       if (localMatch) {
          setDictResult({
@@ -2457,7 +2477,7 @@ function App() {
            }]
          });
          // TTS Fallback
-         TextToSpeech.speak({ text: localMatch.word, lang: 'en-US', rate: 0.9 }).catch(() => {});
+         if (Capacitor.isNativePlatform()) { TextToSpeech.speak({ text: localMatch.word, lang: 'en-US', rate: 0.9 }).catch(() => {}); } else { playWord(localMatch.word); }
       } else if (err.message === 'not_found') {
         setDictError(`"${query}" not found in Global or Local dictionary.`);
       } else if (isOffline) {
@@ -3171,12 +3191,12 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                      <div className="flex justify-between items-center w-full">
                        <div className="flex flex-col">
                          <span className="font-medium text-lg">{item.word}</span>
-                         {srsData[item.word.toLowerCase()] && (
-                           <div className="flex gap-1 mt-1" title={`Mastery Level: ${srsData[item.word.toLowerCase()].level}/5`}>
+                         {srsData[(item.word || '').toLowerCase()] && (
+                           <div className="flex gap-1 mt-1" title={`Mastery Level: ${srsData[(item.word || '').toLowerCase()]?.level || 0}/5`}>
                              {[...Array(5)].map((_, i) => (
                                <div 
                                  key={i} 
-                                 className={`w-2.5 h-1 rounded-full ${i < srsData[item.word.toLowerCase()].level ? 'bg-indigo-500' : 'bg-gray-200'}`} 
+                                 className={`w-2.5 h-1 rounded-full ${i < (srsData[(item.word || '').toLowerCase()]?.level || 0) ? 'bg-indigo-500' : 'bg-gray-200'}`} 
                                />
                              ))}
                            </div>
@@ -3772,13 +3792,16 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                         </motion.button>
                       )}
 
-                      {testMode === 'meaning-mcq' && (
+                      {(testMode === 'meaning-mcq' || testMode === 'visual-mcq') && (
                         <div className="mb-10 p-6 bg-slate-50 rounded-3xl border border-slate-100 text-center animate-in zoom-in">
                           {(() => {
-                            const wordObj = allLearnWords.find(w => w.word.toLowerCase() === testWords[currentTestWordIndex]?.toLowerCase());
+                            const wordObj = completeWordPool.find(w => (w.word || '').toLowerCase() === (testWords[currentTestWordIndex] || '').toLowerCase());
                             if (!wordObj) return null;
                             return (
                               <div className="space-y-4">
+                                {testMode === 'visual-mcq' && (
+                                  <p className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-2">Identify the correct spelling</p>
+                                )}
                                 <p className="text-3xl font-black text-slate-900">{wordObj.meaning}</p>
                                 <div className="h-px bg-slate-200 w-12 mx-auto" />
                                 <p className="text-lg font-medium text-slate-600 italic">"{wordObj.example.replace(new RegExp(wordObj.word, 'gi'), '_____')}"</p>
@@ -3843,11 +3866,11 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                       
                       <div className="grid grid-cols-2 gap-4 mb-10">
                         <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                           <p className="text-3xl font-black text-indigo-600">{userAnswers.filter((ans, i) => ans.toLowerCase() === testWords[i].toLowerCase()).length}</p>
+                           <p className="text-3xl font-black text-indigo-600">{userAnswers.filter((ans, i) => (ans || '').toLowerCase() === (testWords[i] || '').toLowerCase()).length}</p>
                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Correct</p>
                         </div>
                         <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                           <p className="text-3xl font-black text-slate-900">+{userAnswers.filter((ans, i) => ans.toLowerCase() === testWords[i].toLowerCase()).length * 10} XP</p>
+                           <p className="text-3xl font-black text-slate-900">+{userAnswers.filter((ans, i) => (ans || '').toLowerCase() === (testWords[i] || '').toLowerCase()).length * 10} XP</p>
                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gained</p>
                         </div>
                       </div>
@@ -4216,11 +4239,11 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                   <div className="p-4 grid grid-cols-1 gap-2 max-h-64 overflow-y-auto">
                     {savedWords.length === 0 ? (
                       <div className="py-8 text-center text-slate-400 italic text-xs">No words saved yet.</div>
-                    ) : savedWords.filter(w => w.word.toLowerCase().includes(savedSearchQuery.toLowerCase())).length === 0 ? (
+                    ) : savedWords.filter(w => (w.word || '').toLowerCase().includes((savedSearchQuery || '').toLowerCase())).length === 0 ? (
                       <div className="py-8 text-center text-slate-400 italic text-xs">No matching words found.</div>
                     ) : (
                       savedWords
-                        .filter(w => w.word.toLowerCase().includes(savedSearchQuery.toLowerCase()))
+                        .filter(w => (w.word || '').toLowerCase().includes((savedSearchQuery || '').toLowerCase()))
                         .sort((a,b) => b.savedAt - a.savedAt)
                         .map((sw, idx) => (
                         <div key={idx} className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100">
@@ -5034,14 +5057,14 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                             : 'border-slate-100 hover:border-indigo-200 bg-white'}`}
                         >
                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selectedVoiceURI === voice.voiceURI ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
-                            {voice.name.toLowerCase().includes('google') ? <Bot className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                            {(voice.name || '').toLowerCase().includes('google') ? <Bot className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className={`text-xs font-black uppercase tracking-tight truncate ${selectedVoiceURI === voice.voiceURI ? 'text-indigo-900' : 'text-slate-800'}`}>
                               {voice.name.replace('English (United States)', 'US').replace('English (India)', 'IN').replace('English (United Kingdom)', 'UK')}
                             </p>
                             <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-                              {voice.lang} • {voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('aditi') ? 'Female' : 'Male'}
+                              {voice.lang} • {(voice.name || '').toLowerCase().includes('female') || (voice.name || '').toLowerCase().includes('aditi') ? 'Female' : 'Male'}
                             </p>
                           </div>
                           
@@ -5413,8 +5436,8 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
               isOpen={isOnCall} 
               onClose={() => {
                 setIsOnCall(false);
-                SpeechRecognition.stop();
-                SpeechRecognition.removeAllListeners();
+                try { SpeechRecognition.stop(); } catch(e) { console.warn('SR stop error:', e); }
+                try { SpeechRecognition.removeAllListeners(); } catch(e) {}
                 setIsListening(false);
               }}
               isListening={isListening}
