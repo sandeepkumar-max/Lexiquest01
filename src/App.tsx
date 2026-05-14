@@ -1,11 +1,8 @@
-// --- EMERGENCY NUCLEAR DIAGNOSTICS ---
+// --- GLOBAL ERROR DIAGNOSTICS (Production-Safe) ---
 if (typeof window !== 'undefined') {
   console.log("LexiQuest JS Bundle Executing...");
   window.onerror = (msg, url, line, col, error) => {
-    const errorMsg = `CRITICAL JS ERROR: ${msg} \nAt: ${url}:${line}:${col} \nObject: ${JSON.stringify(error)}`;
-    console.error(errorMsg);
-    // Use native alert if possible, otherwise browser alert
-    alert(errorMsg);
+    console.error(`CRITICAL JS ERROR: ${msg} \nAt: ${url}:${line}:${col} \nObject: ${JSON.stringify(error)}`);
   };
 }
 // -------------------------------------
@@ -391,8 +388,7 @@ function App() {
   const [bulkInput, setBulkInput] = useState('');
   const [newWordData, setNewWordData] = useState({ word: '', meaning: '', example: '', category: 'All' });
 
-  // const hasPremium = isPremium || user?.email === MASTER_ADMIN_EMAIL;
-  const hasPremium = true; // Unlock all features for production stabilization
+  const hasPremium = isPremium || user?.email === MASTER_ADMIN_EMAIL;
   
   // SRS (Spaced Repetition System) State
   const [srsData, setSrsData] = useState<Record<string, { level: number, nextReview: number }>>(() => safeParseJSON('srsData', {}));
@@ -760,18 +756,12 @@ function App() {
   // AdMob and setup periodic interstitial
 
 
-  // Global Error Handler
+  // Global Error Handler (Silent in Production — logs only, no user-facing popups)
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
       console.error("Global Error Caught:", event.error);
       const msg = event.error?.message || event.message || 'Unknown JS Error';
       setErrorLog(prev => [...prev, `JS Error: ${msg}`]);
-      if (Capacitor.isNativePlatform()) {
-        Dialog.alert({
-          title: 'App Error Detected',
-          message: `Technical Details: ${msg}. Please report this to the developer.`
-        }).catch(() => {});
-      }
     };
     window.addEventListener('error', handleError);
     return () => window.removeEventListener('error', handleError);
@@ -805,7 +795,7 @@ function App() {
           // Check for pending deletion
           if (deletionRequestedAt) {
             const now = Date.now();
-            const hoursPassed = (now - deletionRequestedAt) / (1000 * 60 * 1000);
+            const hoursPassed = (now - deletionRequestedAt) / (1000 * 60 * 60);
 
             if (hoursPassed >= 24) {
               await FirebaseFirestore.deleteDocument({ reference: 'users/' + result.user.uid }).catch(() => { });
@@ -985,7 +975,7 @@ function App() {
     };
   }, []);
 
-  const CURRENT_VERSION = '1.4.0';
+  const CURRENT_VERSION = '1.4.5';
   const [needsUpdate, setNeedsUpdate] = useState(false);
 
   // Mandatory Update Check
@@ -1395,13 +1385,15 @@ function App() {
       return newXp;
     });
 
-    // Sync XP to Firestore for Leaderboard
+    // Sync XP to Firestore for Leaderboard (use callback values to avoid stale closure)
+    const currentXp = parseInt(localStorage.getItem('xp') || '0') + amount;
+    const currentLevel = parseInt(localStorage.getItem('level') || '1');
     if (user?.uid) {
       FirebaseFirestore.setDocument({
         reference: 'users/' + user.uid,
-        data: { xp: xp + amount, level: level, name: displayName || user.displayName || 'Explorer' },
+        data: { xp: currentXp, level: currentLevel, name: displayName || user.displayName || 'Explorer' },
         merge: true
-      });
+      }).catch(() => {});
     }
   };
 
@@ -2063,7 +2055,7 @@ function App() {
   };
 
   const handleTimeout = () => {
-    if (feedbackState !== 'none') return;
+    if (feedbackStateRef.current !== 'none') return;
     if (!testWords || !testWords[currentTestWordIndex]) return; // Safeguard against crash
 
     if (soundEnabled) wrongSound.play().catch(() => {});
@@ -2132,12 +2124,13 @@ function App() {
     const safetyTimer = setTimeout(() => setIsLexiSpeaking(false), 15000);
 
     // Try Natural Neural Voice (ElevenLabs) first if online (limit to 300 chars for API safety)
-    if (!isOffline && word.length < 300) {
+    const elevenLabsKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
+    if (!isOffline && word.length < 300 && elevenLabsKey) {
       try {
         const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM', {
           method: 'POST',
           headers: {
-            'xi-api-key': 'sk_29bb55b109a201a44a715e920dd050f9b6f356a89352136a',
+            'xi-api-key': elevenLabsKey,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -2291,6 +2284,10 @@ function App() {
     } else {
       if (soundEnabled) wrongSound.play().catch(() => {});
       setFeedbackState('incorrect');
+      // Auto-advance after showing incorrect feedback for 2 seconds
+      setTimeout(() => {
+        handleNextQuestion(currentTestWordIndex);
+      }, 2000);
     }
   };
 
@@ -2825,6 +2822,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
       setArenaInput('');
       
       if (arenaHp - dmg <= 0) {
+        addXp(500); // Award 500 XP for arena victory
         setTimeout(() => setArenaState('result'), 2000);
       } else if (dmg > 0) {
         // Change word after a successful hit
