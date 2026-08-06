@@ -3055,7 +3055,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
       </nav>
 
       {/* Main Content Area */}
-      <main className="flex-1 pt-[calc(3.5rem+var(--safe-area-top))] pb-safe overflow-y-auto flex flex-col">
+      <main className="flex-1 pt-[calc(3.5rem+var(--safe-area-top))] pb-32 overflow-y-auto flex flex-col">
         {isOffline && (
           <div className="bg-amber-500 text-white px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2 animate-pulse sticky top-0 z-20 shadow-sm">
             <PhoneOff className="w-3 h-3" />
@@ -3064,23 +3064,23 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
         )}
 
         {activeTab === 'learn' && (
-          <div className="flex-1 p-5 lg:p-10 overflow-y-auto bg-slate-50">
+          <div className="flex-1 p-4 lg:p-8 overflow-y-auto bg-slate-50">
             <div className="max-w-4xl mx-auto">
               {/* Premium Hero Section */}
-              <div className="mb-10 relative">
+              <div className="mb-6 relative">
                 <div className="absolute top-0 right-0 -translate-y-8 translate-x-8 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute bottom-0 left-0 translate-y-8 -translate-x-8 w-48 h-48 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
                 
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
                   <div className="flex items-start gap-5">
                     <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-100 shrink-0">
                       <BookOpen className="w-9 h-9" />
                     </div>
                     <div>
-                      <h2 className="text-3xl font-black text-slate-900 tracking-tight mb-1.5">
+                      <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-1">
                         Learn New Words
                       </h2>
-                      <p className="text-slate-500 font-medium text-sm leading-relaxed max-w-sm">
+                      <p className="text-slate-500 font-medium text-xs md:text-sm leading-relaxed max-w-sm">
                         Master thousands of English words with smart practice and daily vocabulary goals.
                       </p>
                     </div>
@@ -3105,7 +3105,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
               {/* Enter Grammar Hub Button */}
               <button
                 onClick={() => setActiveTab('grammar')}
-                className="w-full mb-10 py-5 bg-white border border-indigo-100 rounded-3xl shadow-sm hover:shadow-md hover:border-indigo-300 transition-all active:scale-[0.98] flex items-center justify-between px-6 group"
+                className="w-full mb-6 py-4 bg-white border border-indigo-100 rounded-3xl shadow-sm hover:shadow-md hover:border-indigo-300 transition-all active:scale-[0.98] flex items-center justify-between px-5 group"
               >
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
@@ -3120,7 +3120,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
               </button>
 
               {/* Search Box */}
-              <div className="mb-8 relative group">
+              <div className="mb-6 relative group">
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
