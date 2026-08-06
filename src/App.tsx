@@ -285,13 +285,8 @@ function App() {
 
   // AdMob State
   const [adInitialized, setAdInitialized] = useState(false);
-  const [isPremium, setIsPremium] = useState(() => {
-    try {
-      const localEmail = localStorage.getItem('userEmail');
-      if (localEmail === MASTER_ADMIN_EMAIL) return true;
-      return localStorage.getItem('isPremium') === 'true';
-    } catch (e) { return false; }
-  });
+  // App is fully free — all features unlocked for everyone
+  const [isPremium, setIsPremium] = useState(true);
   const [isAdmin, setIsAdmin] = useState(() => {
     try {
       const localEmail = localStorage.getItem('userEmail');
@@ -299,6 +294,7 @@ function App() {
       return localStorage.getItem('isAdmin') === 'true';
     } catch (e) { return false; }
   });
+  // Subscription modal disabled — app is free
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
   const ADMOB_INTERSTITIAL_ID = import.meta.env.VITE_ADMOB_INTERSTITIAL_ID || 'ca-app-pub-3271133689051975/5794528015';
@@ -388,7 +384,8 @@ function App() {
   const [bulkInput, setBulkInput] = useState('');
   const [newWordData, setNewWordData] = useState({ word: '', meaning: '', example: '', category: 'All' });
 
-  const hasPremium = isPremium || user?.email === MASTER_ADMIN_EMAIL;
+  // App is fully free — all premium features unlocked for everyone
+  const hasPremium = true;
   
   // SRS (Spaced Repetition System) State
   const [srsData, setSrsData] = useState<Record<string, { level: number, nextReview: number }>>(() => safeParseJSON('srsData', {}));
@@ -5108,70 +5105,8 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
           </div>
         )}
 
-        {/* Subscription Modal */}
-        {subscriptionModalOpen && (
-          <div className="fixed inset-0 bg-black/60 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-md">
-            <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95 duration-300">
-              <div className="relative h-40 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-8 flex flex-col justify-end">
-                <button
-                  onClick={() => setSubscriptionModalOpen(false)}
-                  className="absolute top-4 right-4 p-2 bg-black/10 hover:bg-black/20 text-white rounded-full transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-                <h3 className="text-2xl font-black text-white">Upgrade to Premium</h3>
-                <p className="text-white/80 text-xs font-bold uppercase tracking-widest">Unlock your full potential</p>
-              </div>
-
-              <div className="p-6">
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <button
-                    onClick={() => handleSubscribe('monthly')}
-                    className="p-5 rounded-3xl border-2 border-amber-400 bg-amber-50 hover:border-indigo-600 transition-all text-left group relative overflow-hidden"
-                  >
-                    <div className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">Exclusive Offer</div>
-                    <p className="text-[10px] font-black text-amber-600 uppercase mb-1">Trial Plan</p>
-                    <p className="text-2xl font-black text-slate-900">₹2 <span className="text-xs font-bold text-slate-400">/ 3 Days</span></p>
-                    <p className="text-[10px] font-bold text-indigo-600 mt-2">Then ₹199/month (Auto-pay) →</p>
-                  </button>
-                  <button
-                    onClick={() => handleSubscribe('yearly')}
-                    className="p-5 rounded-3xl border-2 border-indigo-600 bg-indigo-50/50 text-left relative overflow-hidden"
-                  >
-                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded-bl-lg uppercase">Limited Deal</div>
-                    <p className="text-[10px] font-black text-indigo-600 uppercase mb-1">Global Access</p>
-                    <p className="text-2xl font-black text-slate-900">₹599</p>
-                    <p className="text-[10px] font-bold text-indigo-600 mt-2">Full 6 Months Access →</p>
-                  </button>
-                </div>
-
-                <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100">
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight mb-2 flex items-center gap-1.5">
-                    <Info className="w-3.5 h-3.5 text-indigo-500" /> Subscription Details
-                  </p>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Start your 3-day trial for just <span className="font-bold text-indigo-600">₹2</span>. After 72 hours, you will be automatically charged <span className="font-bold text-indigo-600">₹199/month</span> unless cancelled in Google Play. Manage or cancel anytime.
-                  </p>
-                </div>
-
-                <div className="space-y-3 mb-6">
-                  {[
-                    { icon: <CheckCircle className="w-4 h-4 text-green-500" />, text: "No Advertisements" },
-                    { icon: <GraduationCap className="w-4 h-4 text-purple-500" />, text: "Adv. Meaning Tests" },
-                    { icon: <BookOpen className="w-4 h-4 text-indigo-500" />, text: "Advanced Dictionary" },
-                    { icon: <Plus className="w-4 h-4 text-orange-500" />, text: "Unlimited Custom Words" }
-                  ].map((f, i) => (
-                    <div key={i} className="flex items-center gap-3 text-sm font-medium text-slate-600">
-                      {f.icon} {f.text}
-                    </div>
-                  ))}
-                </div>
-
-                <p className="text-center text-[10px] text-gray-400 mt-4 px-4 uppercase tracking-widest font-bold">Secure Payment powered by Google Play</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Subscription Modal — DISABLED: App is fully free */}
+        {false && subscriptionModalOpen && null}
 
         {/* Level-Up Celebration Modal */}
         <AnimatePresence>
