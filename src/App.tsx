@@ -2997,6 +2997,19 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setDailyWordsModalOpen(true)}
+            className="relative w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-600 hover:text-white transition-all shadow-sm group overflow-hidden"
+            title="Daily Challenge"
+          >
+            <Target className="w-5 h-5 relative z-10" />
+            {dailyWordsLearned < dailyWords.length && (
+              <span className="absolute -top-1 -right-1 px-1 min-w-[16px] h-4 bg-pink-500 border-2 border-white rounded-full flex items-center justify-center text-[8px] font-black text-white">
+                {dailyWords.length - dailyWordsLearned}
+              </span>
+            )}
+          </button>
+          
+          <button
             onClick={() => setActiveTab('dictionary')}
             className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-50 text-slate-400 border border-slate-100 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
             title="Dictionary Search"
@@ -5156,24 +5169,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
 
 
         {/* Daily 5 Floating Button */}
-        {activeTab === 'learn' && dailyWords.length > 0 && (
-          <motion.button
-            initial={{ scale: 0, y: 100 }}
-            animate={{ scale: 1, y: 0 }}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setDailyWordsModalOpen(true)}
-            className="fixed bottom-24 right-6 z-[60] w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center overflow-hidden group"
-          >
-            <div className="absolute inset-0 bg-gradient-to-tr from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <Target className="w-7 h-7 relative z-10" />
-            {dailyWordsLearned < dailyWords.length && (
-              <span className="absolute -top-1 -right-1 px-1.5 min-w-[20px] h-5 bg-pink-500 border-2 border-white rounded-full flex items-center justify-center text-[8px] font-black">
-                {dailyWords.length - dailyWordsLearned}
-              </span>
-            )}
-          </motion.button>
-        )}
+        {/* Removed FAB here - moved to header */}
 
         {/* Daily 5 Modal */}
         <AnimatePresence>
