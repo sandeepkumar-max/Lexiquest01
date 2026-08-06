@@ -5065,40 +5065,27 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                     <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-md uppercase">High Quality</span>
                   </div>
                   
-                  <div className="max-h-[320px] overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-                    <div className="grid grid-cols-1 gap-3">
-                      {availableVoices.filter(v => v.lang.startsWith('en-')).map((voice, i) => (
-                        <button
-                          key={voice.voiceURI}
-                          onClick={() => {
-                            setSelectedVoiceURI(voice.voiceURI);
-                            localStorage.setItem('selectedVoiceURI', voice.voiceURI);
-                            playWord("Hello, I am Lexi.");
-                          }}
-                          className={`p-4 rounded-2xl border-2 transition-all text-left relative group flex items-center gap-4 ${selectedVoiceURI === voice.voiceURI 
-                            ? 'border-indigo-600 bg-indigo-50/50 shadow-lg shadow-indigo-100' 
-                            : 'border-slate-100 hover:border-indigo-200 bg-white'}`}
-                        >
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selectedVoiceURI === voice.voiceURI ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
-                            {(voice.name || '').toLowerCase().includes('google') ? <Bot className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-xs font-black uppercase tracking-tight truncate ${selectedVoiceURI === voice.voiceURI ? 'text-indigo-900' : 'text-slate-800'}`}>
-                              {voice.name.replace('English (United States)', 'US').replace('English (India)', 'IN').replace('English (United Kingdom)', 'UK')}
-                            </p>
-                            <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-                              {voice.lang} • {(voice.name || '').toLowerCase().includes('female') || (voice.name || '').toLowerCase().includes('aditi') ? 'Female' : 'Male'}
-                            </p>
-                          </div>
-                          
-                          {selectedVoiceURI === voice.voiceURI && (
-                            <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center">
-                              <CheckCircle className="w-4 h-4 text-white" />
-                            </div>
-                          )}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="space-y-3">
+                    <button
+                      onClick={() => playWord("Hello, I am Lexi. Your high quality system voice is ready.")}
+                      className="w-full p-4 rounded-2xl border-2 border-indigo-600 bg-indigo-50/50 shadow-lg shadow-indigo-100 transition-all text-left relative group flex items-center gap-4"
+                    >
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-indigo-600 text-white">
+                        <Bot className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-black text-indigo-900 uppercase tracking-tight truncate">
+                          System Voice (Auto)
+                        </p>
+                        <p className="text-[10px] font-bold text-slate-500 mt-0.5">
+                          High Quality Natural Voice
+                        </p>
+                      </div>
+                      
+                      <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center">
+                        <CheckCircle className="w-4 h-4 text-white" />
+                      </div>
+                    </button>
                   </div>
                 </div>
 
