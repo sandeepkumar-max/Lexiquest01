@@ -859,11 +859,18 @@ function App() {
         if (voices && voices.length > 0) {
           setAvailableVoices(voices);
           // Automatically pick a "Premium" sounding voice if not already selected
-          const preferred = voices.find(v => (v.name || '').includes('Google') && (v.lang || '').startsWith('en')) 
+          const preferred = voices.find(v => (v.name || '').toLowerCase().includes('natural')) 
+                         || voices.find(v => (v.name || '').toLowerCase().includes('google us english'))
+                         || voices.find(v => (v.name || '').toLowerCase().includes('google uk english female'))
+                         || voices.find(v => (v.name || '').includes('Google') && (v.lang || '').startsWith('en')) 
                          || voices.find(v => (v.lang || '').startsWith('en-GB'))
                          || voices.find(v => (v.lang || '').startsWith('en-US'))
                          || voices[0];
-          if (preferred && !localStorage.getItem('selectedVoiceURI')) {
+          
+          const currentVoice = voices.find(v => v.voiceURI === localStorage.getItem('selectedVoiceURI'));
+          const isRobotic = currentVoice && !((currentVoice.name || '').toLowerCase().includes('natural') || (currentVoice.name || '').toLowerCase().includes('google'));
+          
+          if (preferred && (!localStorage.getItem('selectedVoiceURI') || isRobotic)) {
             setSelectedVoiceURI(preferred.voiceURI);
             localStorage.setItem('selectedVoiceURI', preferred.voiceURI);
           }
@@ -1805,13 +1812,21 @@ function App() {
         setAvailableVoices(allEnVoices);
 
         setSelectedVoiceURI(prev => {
-          if (prev) return prev;
-          const defaultVoice = 
-            enInVoices.find(v => v.name.includes('Google') || v.name.includes('India')) ||
-            enInVoices[0] ||
-            otherEnVoices.find(v => v.name.includes('Google')) ||
-            otherEnVoices[0];
-          return defaultVoice ? defaultVoice.voiceURI : prev;
+          const naturalVoice = allEnVoices.find(v => (v.name || '').toLowerCase().includes('natural')) ||
+                               allEnVoices.find(v => (v.name || '').toLowerCase().includes('google us english')) ||
+                               allEnVoices.find(v => (v.name || '').toLowerCase().includes('google uk english female')) ||
+                               allEnVoices.find(v => (v.name || '').toLowerCase().includes('google'));
+                               
+          const defaultVoice = naturalVoice || enInVoices.find(v => v.name.includes('Google') || v.name.includes('India')) || enInVoices[0] || otherEnVoices[0];
+          
+          const currentVoice = allEnVoices.find(v => v.voiceURI === prev);
+          const isRobotic = currentVoice && !((currentVoice.name || '').toLowerCase().includes('natural') || (currentVoice.name || '').toLowerCase().includes('google'));
+          
+          if (!prev || (isRobotic && naturalVoice)) {
+            if (naturalVoice) localStorage.setItem('selectedVoiceURI', naturalVoice.voiceURI);
+            return defaultVoice ? defaultVoice.voiceURI : prev;
+          }
+          return prev;
         });
       }
     };
