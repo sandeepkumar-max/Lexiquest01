@@ -3071,17 +3071,17 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
                 <div className="absolute top-0 right-0 -translate-y-8 translate-x-8 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute bottom-0 left-0 translate-y-8 -translate-x-8 w-48 h-48 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
                 
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
-                  <div className="flex items-start gap-5">
-                    <div className="w-16 h-16 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-100 shrink-0">
-                      <BookOpen className="w-9 h-9" />
+                <div className="flex flex-col gap-3 relative z-10">
+                  <div className="flex items-start gap-4">
+                    <div className="w-14 h-14 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-100 shrink-0">
+                      <BookOpen className="w-7 h-7" />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-1">
-                        Learn New Words
+                      <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-0.5">
+                        Learn Vocabulary ⚡
                       </h2>
-                      <p className="text-slate-500 font-medium text-xs md:text-sm leading-relaxed max-w-sm">
-                        Master thousands of English words with smart practice and daily vocabulary goals.
+                      <p className="text-slate-500 font-medium text-xs leading-snug">
+                        Master thousands of English words with daily vocabulary goals.
                       </p>
                     </div>
                   </div>
@@ -3105,7 +3105,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
               {/* Enter Grammar Hub Button */}
               <button
                 onClick={() => setActiveTab('grammar')}
-                className="w-full mb-6 py-4 bg-white border border-indigo-100 rounded-3xl shadow-sm hover:shadow-md hover:border-indigo-300 transition-all active:scale-[0.98] flex items-center justify-between px-5 group"
+                className="w-full mb-4 py-3 bg-white border border-indigo-100 rounded-2xl shadow-sm hover:shadow-md hover:border-indigo-300 transition-all active:scale-[0.98] flex items-center justify-between px-4 group"
               >
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 group-hover:scale-110 transition-transform">
@@ -3120,7 +3120,7 @@ If sentence is complex, creative, and correct -> damage: 50. Do not output anyth
               </button>
 
               {/* Search Box */}
-              <div className="mb-6 relative group">
+              <div className="mb-4 relative group">
                 <div className="relative">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
