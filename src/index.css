@@ -39,6 +39,24 @@ body {
   margin-bottom: var(--safe-area-bottom);
 }
 
+@utility scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 body.dark-mode {
   --bg-color: #010409;
   --panel-color: #0d1117;

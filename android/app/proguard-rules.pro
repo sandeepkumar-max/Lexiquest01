@@ -5,6 +5,17 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
+# --- LexiQuest: R8 release build ---
+# @capacitor-firebase/authentication references the optional Facebook SDK
+# (FacebookAuthProviderHandler). We only use Google/email auth, so the
+# Facebook classes are intentionally absent from the build.
+-dontwarn com.facebook.CallbackManager$Factory
+-dontwarn com.facebook.CallbackManager
+-dontwarn com.facebook.FacebookCallback
+-dontwarn com.facebook.login.LoginManager
+-dontwarn com.facebook.login.widget.LoginButton
+
+
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface
 # class:

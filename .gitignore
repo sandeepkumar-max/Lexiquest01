@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# vocabulary generation intermediates
+.vocab-work/

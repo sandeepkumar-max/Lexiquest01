@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     AdMob: {
-      appId: 'ca-app-pub-3271133689051975~6391196608',
+      appId: 'ca-app-pub-3271133689051975~5959634182',
     },
     FirebaseAuthentication: {
       skipNativeAuth: false,

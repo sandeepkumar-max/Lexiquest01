@@ -71,69 +71,77 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center p-6 font-sans pt-safe pb-safe">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col items-center justify-center p-6 font-sans pt-safe pb-safe">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         className="w-full max-w-md"
       >
         {/* Header */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 mb-4 shadow-xl shadow-indigo-900/20">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 mb-4 shadow-lg shadow-indigo-200">
             <GraduationCap className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight text-white mb-1">LexiQuest</h1>
+          <h1 className="text-3xl font-black tracking-tight text-slate-900 mb-1">LexiQuest</h1>
           <p className="text-slate-500 text-sm font-medium">Master your vocabulary daily</p>
         </div>
 
         {/* Card */}
-        <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2rem] shadow-2xl overflow-hidden relative">
+        <div className="bg-white border border-slate-100 p-6 rounded-3xl shadow-xl shadow-slate-200/50 overflow-hidden relative">
           <AnimatePresence mode="wait">
             <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               {/* Email Form */}
-              <form onSubmit={handleAuth} className="space-y-4">
+              <form onSubmit={handleAuth} className="space-y-3">
                 <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600" />
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
+                    id="lexi-email"
+                    name="email"
                     type="email"
+                    autoComplete="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 bg-slate-950 border border-slate-800 rounded-2xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-700 font-medium"
+                    className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all placeholder:text-slate-400 font-medium text-slate-900 text-base"
                     placeholder="Email address"
                     required
                   />
                 </div>
                 <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input
+                    id="lexi-password"
+                    name="password"
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete={isLogin ? 'current-password' : 'new-password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    className="w-full pl-12 pr-12 py-4 bg-slate-950 border border-slate-800 rounded-2xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-700 font-medium"
+                    className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition-all placeholder:text-slate-400 font-medium text-slate-900 text-base"
                     placeholder="Password"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 hover:text-indigo-400"
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600"
                   >
                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
                 {isLogin && (
-                  <button
-                    type="button"
-                    onClick={handleForgotPassword}
-                    className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-indigo-400 transition-colors ml-1"
-                  >
-                    {resetLoading ? 'Sending…' : 'Forgot Password?'}
-                  </button>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-indigo-600 transition-colors ml-1"
+                    >
+                      {resetLoading ? 'Sending…' : 'Forgot Password?'}
+                    </button>
+                  </div>
                 )}
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-50 transition-all active:scale-95 disabled:opacity-50 mt-4"
+                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 shadow-lg shadow-indigo-200 disabled:shadow-none mt-2"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : isLogin ? 'Sign In' : 'Create Account'}
                 </button>
@@ -146,10 +154,10 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
                     key="error"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
-                    className="mt-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex gap-3 overflow-hidden"
+                    className="mt-4 p-3 rounded-xl bg-red-50 border border-red-100 flex gap-3 overflow-hidden"
                   >
                     <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                    <p className="text-xs font-bold text-red-400 leading-relaxed">{error}</p>
+                    <p className="text-xs font-bold text-red-600 leading-relaxed">{error}</p>
                   </motion.div>
                 )}
                 {success && (
@@ -157,22 +165,22 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
                     key="success"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
-                    className="mt-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20 flex gap-3 overflow-hidden"
+                    className="mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-100 flex gap-3 overflow-hidden"
                   >
-                    <CheckCircle className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-                    <p className="text-xs font-bold text-green-400 leading-relaxed">{success}</p>
+                    <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-xs font-bold text-emerald-700 leading-relaxed">{success}</p>
                   </motion.div>
                 )}
               </AnimatePresence>
 
               {/* Toggle Login/Sign‑up */}
-              <div className="mt-8 text-center text-xs font-bold">
+              <div className="mt-6 text-center text-sm font-bold">
                 <span className="text-slate-500">
                   {isLogin ? 'New to LexiQuest?' : 'Already have an account?'}
                 </span>{' '}
                 <button
                   onClick={() => { setIsLogin(!isLogin); setError(''); }}
-                  className="text-indigo-400 hover:text-indigo-300 ml-1"
+                  className="text-indigo-600 hover:text-indigo-700 ml-1"
                 >
                   {isLogin ? 'Create one now' : 'Go to Sign In'}
                 </button>
@@ -182,7 +190,7 @@ const Auth: React.FC<AuthProps> = ({ onSuccess }) => {
         </div>
 
         {/* Footer */}
-        <p className="text-center mt-12 text-[10px] font-black uppercase tracking-widest text-slate-700">
+        <p className="text-center mt-10 text-[10px] font-black uppercase tracking-widest text-slate-400">
           Made for Word Lovers
         </p>
       </motion.div>
