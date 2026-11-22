@@ -1380,7 +1380,7 @@ function App() {
   }, []);
 
   const [needsUpdate, setNeedsUpdate] = useState(false);
-  const [currentVersion, setCurrentVersion] = useState('1.5.0');
+  const [currentVersion, setCurrentVersion] = useState('1.6.0');
   const [requiredVersion, setRequiredVersion] = useState<string | null>(null);
 
   const compareVersion = (a: string, b: string): number => {
@@ -1401,7 +1401,7 @@ function App() {
       if (!Capacitor.isNativePlatform()) return;
       try {
         const info = await CapApp.getInfo();
-        const current = info.version || '1.5.0';
+        const current = info.version || '1.6.0';
         setCurrentVersion(current);
         const { snapshot } = await FirebaseFirestore.getDocument({ reference: 'app_config/version' });
         if (snapshot && snapshot.data) {
@@ -1411,7 +1411,7 @@ function App() {
           let required: string | null = null;
           if (minimumVersion && compareVersion(current, minimumVersion) < 0) {
             required = minimumVersion;
-          } else if (latest && latest !== current) {
+          } else if (latest && compareVersion(latest, current) > 0) {
             required = latest;
           }
           if (required) {
